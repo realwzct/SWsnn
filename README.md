@@ -15,13 +15,13 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
     make
 ```
 
-* Start SunwayMR resource manager , while specifying `master IP`, `master port`, `shared threads of node`, `shared memory of node`
+* Start SunwayMR resource manager ,
 
 ```bash
     ./sunwaymr -t 192.168.1.85 19113 4 1024
 ```
 
-* Now, you can run example program **on master** (in a new terminal)
+* Now, you can run example program
 
 ```bash
     ./sunwaymr -a examples/SunwayMRPi.cpp
