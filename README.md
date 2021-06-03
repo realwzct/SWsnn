@@ -9,22 +9,23 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
 
 ## Usage
 
-* Download and make source on each node
+* Download and make source
 
 ```bash
     make
 ```
 
-* Start SunwayMR resource manager ,
+* Grant shell file permissions 
 
 ```bash
-    ./sunwaymr -t 192.168.1.85 19113 4 1024
+    chmod +x run.sh
 ```
 
-* Now, you can run example program
+* Run SWsnn on  Taihuzhiguang supercomputer
 
 ```bash
-    ./sunwaymr -a examples/SunwayMRPi.cpp
+    ./run.sh
 ```
+
 
 * See results in listening terminal
