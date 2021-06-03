@@ -1,0 +1,2 @@
+address related variables are unstable: iD, pre_i, dIndex, post_i.
+dIndex can be contral by bit operation. iD also
