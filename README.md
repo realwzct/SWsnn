@@ -1,6 +1,6 @@
 # SWsnn
 
-SWsnn is a new type of high-efficiency parallel spiking neural network simulator based on the SW26010 architecture of TaihuLight supercomputer, which supports large-scale and high-precision brain simulation, and has good acceleration effects.
+SWsnn is a new type of high-efficiency parallel spiking neural network simulator based on the SW26010 architecture of TaihuLight supercomputer, which supports large-scale and high-precision brain simulation, and has good acceleration effects
 
 ## Hardware dependencies
 
