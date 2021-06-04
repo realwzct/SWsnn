@@ -1,10 +1,10 @@
 # SWsnn
 
-SWsnn SWsnn is a new type of high-efficiency parallel pulse neural network simulator based on the SW26010 architecture of Taihuzhiguang supercomputer, named, which supports large-scale and high-precision brain simulation, and has good acceleration effects.
+SWsnn is a new type of high-efficiency parallel spiking neural network simulator based on the SW26010 architecture of TaihuLight supercomputer, which supports large-scale and high-precision brain simulation, and has good acceleration effects.
 
 ## Hardware dependencies
 
-This program based on SW26010 of the Sunway TaihuLight supercomputer.
+The programs are based on SW26010 of the Sunway TaihuLight supercomputer.
 SW26010 is a many-core accelerator, whose cores are independent of each other, and register-level communication (RLC) mechanism allows data communication between cores with low latency
 
 ## Usage
@@ -21,7 +21,7 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
     chmod +x run.sh
 ```
 
-- Run SWsnn on  Taihuzhiguang supercomputer
+- Run SWsnn on  TaihuLight supercomputer
     - Run an existing program 
 
     ```bash
@@ -36,11 +36,11 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
        The second parameter: Number of neurons  
        The third parameter: Max delay  
        The fourth parameter: Time step(The time step can only be the reciprocal of the power of two)  
-       The fifth parameter: Simulate time  
+       The fifth parameter: Simulation time  
        The sixth parameter: Input current parameters 
        
        
        
     
         
-- See results in listening terminal
+- See results in terminal
