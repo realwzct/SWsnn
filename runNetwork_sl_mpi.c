@@ -24,6 +24,7 @@ __thread_local volatile unsigned int st0,ed0,result;
 __thread_local volatile unsigned int cdma,cspike;
 __thread_local volatile unsigned int cdma_mpi,cspike_mpi;
 extern volatile unsigned int dma[64],spike[64],NS_group,NSall,numSpike[64];
+extern float currentfactor;
 __thread_local volatile unsigned int NSgroup_slave,NSall_slave;
 
 __thread_local swInfo_t swInfo;
@@ -170,7 +171,6 @@ static void decayConduct(void *ptr){
                 if (swInfo.sim_with_conductances) {
                         nInfo[i].gAMPA*=swInfo.dAMPA;
                         nInfo[i].gGABAa*=swInfo.dGABAa;
-
                         nInfo[i].gNMDA_d*=swInfo.dNMDA;//instantaneous rise
                         nInfo[i].gGABAb_d*=swInfo.dGABAb;//instantaneous rise
                 }
@@ -207,7 +207,7 @@ static void neuronUpdate(int it){
 			tmpI=-(nInfo[i].gAMPA*(volt-0)
 				 +tmpgNMDA*tmpiNMDA/(1+tmpiNMDA)*(volt-0)
 				 +nInfo[i].gGABAa*(volt+70)
-				 +tmpgGABAb*(volt+90)   );
+				 +tmpgGABAb*(volt+90));
 		} else {
 			tmpI=nInfo[i].gAMPA;
 		}
@@ -415,7 +415,6 @@ static void neuronUpdate_simd(){
 		for(j=0;j<4;j++){
 			nInfo[i+j].voltage=tmpv[j];
 			nInfo[i+j].recovery=tmpu[j];
-
 			nInfo[i+j].gAMPA=tmpgAMPA[j];
 			nInfo[i+j].gNMDA_d=tmpgNMDA_d[j];
 			nInfo[i+j].gGABAa=tmpgGABAa[j];
@@ -680,16 +679,17 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 	return 0;
 }
 
-static void InputCurrent(float wt,int nspike);
+static void InputCurrent(float wt, float nspike);
 void SpikeDeliver(void *ptr){
 	SpikeDmaRead_mpi(ptr);//mpi++++
 	CurrentUpdate_mpi(ptr);
-	float wt=0.0005/1.07/1.000;
-	int   nspike=20;
+	float wt=0.00085;
+	float nspike;
+	nspike = currentfactor;
 	InputCurrent(wt,nspike);
 	return;
 }
-static void InputCurrent(float wt,int nspike)
+static void InputCurrent(float wt, float nspike)
 {
 	int dIndex = offset+swInfo.Ndt/2;
         if (dIndex>=lenRB)dIndex-=lenRB;
@@ -722,7 +722,7 @@ static void put_get_syn(synInfo_t *sInfoLc){
 			REG_GETR(_v[2]);
 			REG_GETR(_v[3]);
 			REG_GETR(_v[4]);
-		
+
 	}
 	else{
 		intv8 *_vsrc = _v+len;

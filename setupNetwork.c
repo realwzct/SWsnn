@@ -221,8 +221,7 @@ static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo) {
 	/******init*****/
 	long is;
 	long len=sInfo->preN*Ndelay*NTh*MaxN;
-	//printf("connectPart::sInfoHost %d\n",sInfo->sInfoHost);
-	//printf("connectPart::%ld %d %d %d\n",len,preN,NTh,MaxN);
+
 	for(is=0;is<len;is++){
 		sInfo->sInfoHost[is].postId=0xffff;
 		sInfo->sInfoHost[is].dl=0;
@@ -297,7 +296,6 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 	if(rank=nproc-1)sInfo->gSize = sInfo->numNReg-(nproc-1)*sInfo->gSize;
 	int SizeN=(sInfo->gSize-1)/NTh+1;
 	assert(SizeN*NTh>=sInfo->gSize);
-	//fprintf(stderr,"rank=%d nproc=%d gSize=%d gStart=%d numNReg=%d Nsyn=%d\n",rank,nproc,sInfo->gSize,sInfo->gStart,sInfo->numNReg,sInfo->Nsyn);
 
 	if (sInfo->Nsyn==0) sInfo->Nsyn=10000;
 	if (sInfo->Nsyn>sInfo->numNReg) sInfo->Nsyn=sInfo->numNReg;

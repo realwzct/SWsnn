@@ -80,9 +80,9 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,
 	if (rank == 0)
 	{
 		printf("Number of pulses %d\n", nspikeall);
-		printf("doSnnSim::T5: %f\n", DO_T5);
-		printf("doSnnSim::T6: %f\n", DO_T6);
-		printf("doSnnSim::T7: %f\n", DO_T7);
+		printf("neuron state update: %f\n", DO_T5);
+		printf("mpi time: %f\n", DO_T6);
+		printf("spike deliver: %f\n", DO_T7);
 	}
 
 	return 0;

@@ -2,6 +2,7 @@
 #include <sys/time.h>    // for gettimeofday() chenged!!
 #include <stdlib.h>
 int timestep;
+float currentfactor;
 
 int main(int argc, char *argv[])
 {
@@ -11,8 +12,9 @@ int main(int argc, char *argv[])
 	int delay = atoi(argv[3]);          			//max delay
 	timestep = (int)(1/atof(argv[4]));              //time step
 	int simulatetime = atoi(argv[5]);				//simulatetime
+	currentfactor = atof(argv[6]);
 
-	//printf("%d\n",timestep);
+	//printf("%f\n",currentfactor);
 	int *send, *rec;
 	unsigned long  size1, size2;
     int rank, nproc;
