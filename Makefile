@@ -1,6 +1,6 @@
 EXE	= swtest
 CC	= mpicc
-SCC	= sw5cc
+SCC	= sw5cc.new
 HFLAGS	= -host   -O2 -msimd 
 SFLAGS	= -slave  -O2 -msimd 
 
@@ -28,7 +28,8 @@ my_slave.o: ./my_slave.c
 
 dmaWait.o: ./dmaWait.c
 	$(SCC) -c $(SFLAGS) ./dmaWait.c
-
+run: 
+	bsub -b -I -q q_sw_share -n 56 -np 4 -cgsp 64 -host_stack 256 -share_size 4096 ./swtest 10000 200000 2 0.125 1000 5.5
 clean:
 	rm *.o
 	rm $(EXE)

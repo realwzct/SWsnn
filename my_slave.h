@@ -20,6 +20,7 @@
 #define REG_PUTC(var, dst) asm volatile ("putc %0,%1\n"::"r"(var),"r"(dst))
 #define REG_GETR(var) asm volatile ("getr %0\n":"=r"(var))
 #define REG_GETC(var) asm volatile ("getc %0\n":"=r"(var))
+
 #else
 #define REG_PUTR(var,dest) \
 asm volatile ("putr %0,%1\n"::"r"(var),"r"(dest):"memory")

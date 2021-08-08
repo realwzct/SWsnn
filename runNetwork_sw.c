@@ -23,38 +23,23 @@ extern SLAVE_FUN(SpikeDeliver)(void*);
 
 static bool updateTime(snnInfo_t *snnInfo);
 static void doSnnSim(snnInfo_t*,grpInfo_t*,connInfo_t*,neurInfo_t*,synInfo_t*, swInfo_t*);
+extern int rank,nproc;
+static long t1=0,t2=0,t3=0;
 
-
-double DO_T1,DO_T2,DO_T3,DO_T4,DO_T5,DO_T6,DO_T7,DO_T8,DO_TA;
-long CC0,CC1;
-
-int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,
-	       connInfo_t *cInfo, neurInfo_t *nInfo,
-	       synInfo_t *synInfo, swInfo_t *swInfo,
-	       int _nmsec, bool printRun) 
+int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t *nInfo,
+    synInfo_t *synInfo, swInfo_t *swInfo,int _nmsec, bool printRun) 
 {
-
-	struct timeval t0,t4,t5,t6,t7,t8,t9;
-	struct timeval *time1,*time2;
-	gettimeofday( &t0, NULL );
-
-	int rank, nproc;
-	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	assert(_nmsec >= 0);
 	int runDurMs = _nmsec;
 
 	sInfo->simTimeRunStart = sInfo->simTime;
 	sInfo->simTimeRunStop  = sInfo->simTime+runDurMs;
-
-	DO_T5=0.0; DO_T6=0.0; DO_T7=0.0; DO_T8=0.0; DO_TA=0.0;CC0=0;CC1=0;
 
 	athread_init();//initialize athread!!!!
 	athread_spawn(initSW,swInfo);
     athread_join();
 	int i;
 	nspikeall=0;
-	for(i=0; i<runDurMs; i++) 
+	for(i = 0; i<runDurMs; i++) 
 	{
 		doSnnSim(sInfo,gInfo,cInfo,nInfo,synInfo,swInfo);
 		updateTime(sInfo);
@@ -64,8 +49,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,
 	athread_halt();
 
 	unsigned long cdma=0,cspike=0;
-	for(i=0;i<63;i++)
-	{
+	for(i=0;i<63;i++){
 		cdma+=dma[i];
 		cspike+=spike[i];
 	}
@@ -80,35 +64,28 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,
 	if (rank == 0)
 	{
 		printf("Number of pulses %d\n", nspikeall);
-		printf("neuron state update: %f\n", DO_T5);
-		printf("mpi time: %f\n", DO_T6);
-		printf("spike deliver: %f\n", DO_T7);
+		printf("neuron state update: %.4lf ms\n", (double)(t1)*1000/CLOCKRATE);
+		printf("mpi time: %.4lf ms\n", (double)(t2)*1000/CLOCKRATE);
+		printf("spike deliver: %.4lf ms\n", (double)(t3)*1000/CLOCKRATE);
 	}
 
 	return 0;
 }
 
-static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,
-               connInfo_t *cInfo, neurInfo_t *nInfo,
-               synInfo_t *synInfo, swInfo_t *swInfo) 
+static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, 
+    neurInfo_t *nInfo,synInfo_t *synInfo, swInfo_t *swInfo) 
 {
-	struct timeval t0,t1,t2,t3,t4,t5,t6,t7,t8,t9;
-	struct timeval *tm1,*tm2;
-	gettimeofday( &t0, NULL );
+	long time0,time1,time2,time3;
 
-	long st,st0,ed;
-	{{gettimeofday( &t4, NULL );st = rpcc();}
-	{athread_spawn(StateUpdate,swInfo);//
-	athread_join();}
-	{gettimeofday( &t5, NULL );st0= rpcc();}}
+	{time0 = rpcc();}
+	athread_spawn(StateUpdate,swInfo);
+	athread_join();
+	{time1 = rpcc();}
 	sInfo->simTime++;
 
-	int rank, nproc;
-	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	int i;
+	
 	int iND = sInfo->simTime%sInfo->Ndelay;
-#if 1
+
 	spikeTime_t *sendBuf, *recvBuf;
 	int *displs, *recvCount;
 	int root = 0;
@@ -116,20 +93,19 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,
 
 	sendBuf = &(sInfo->firingTableHost[0]);
 	senddatanum= NS_group;
-
 	displs = sInfo->displs; // displs
 	recvCount = sInfo->recvCount; // send num
 
 	MPI_Gather(&senddatanum,1,MPI_INT,recvCount,1, MPI_INT,root,MPI_COMM_WORLD);
 
-	if(!rank)
-	{
+	if(!rank){
 		displs[0] = 0;
 		NSall = recvCount[0];
-		for(i=1;i<nproc;i++)
-		{
+		int i;
+		for(i=1;i<nproc;i++){	
+			//printf("%d %d %d %d %d %d %d %d %d %d rank%d\n",recvCount[0],recvCount[1],recvCount[2],recvCount[3],recvCount[4],recvCount[5],recvCount[6],recvCount[7],recvCount[8],recvCount[9],rank);
 			displs[i] = displs[i-1]+recvCount[i-1];
-			NSall += recvCount[i];
+			NSall += recvCount[i];//总数量
 		}
 	}
 
@@ -144,26 +120,20 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,
 		MPI_INT,
 		root, 
 		MPI_COMM_WORLD);
-#if 1	
+
 	MPI_Bcast(&NSall,1,MPI_INT,root,MPI_COMM_WORLD);
 	MPI_Bcast(recvBuf,NSall,MPI_INT,root,MPI_COMM_WORLD);
 	nspikeall += NSall;
-#endif 
 
-#endif
+	{time2 = rpcc();}
 
-	gettimeofday( &t6, NULL );
-
-	{athread_spawn(SpikeDeliver,swInfo);
+	athread_spawn(SpikeDeliver,swInfo);
 	athread_join();
-	{gettimeofday( &t7, NULL );ed = rpcc();}}
+	{time3 = rpcc();}
 
-	tm1=&t4; tm2=&t5;
-	DO_T5+=((double)(tm2->tv_sec-tm1->tv_sec)+(double)(tm2->tv_usec-tm1->tv_usec)*1e-6);
-	tm1=&t5; tm2=&t6;
-	DO_T6+=((double)(tm2->tv_sec-tm1->tv_sec)+(double)(tm2->tv_usec-tm1->tv_usec)*1e-6);
-	tm1=&t6; tm2=&t7;
-	DO_T7+=((double)(tm2->tv_sec-tm1->tv_sec)+(double)(tm2->tv_usec-tm1->tv_usec)*1e-6);
+	t1 = time1-time0+t1;
+	t2 = time2-time1+t2;
+	t3 = time3-time2+t3;
 	return;
 }
 

@@ -13,12 +13,17 @@
 typedef uint8_t bool;
 #include "swstruct.h"
 #define NTh 64
-
-extern int timestep;
+#define CLOCKRATE 1.45e9
 static inline unsigned long rpcc()
 {
 	unsigned long time;
 	asm("rtc %0": "=r" (time) : );
+	return time;
+}
+
+static inline unsigned long rpcc_slave() {
+	unsigned long time;
+	asm("rcsr %0,4": "=r" (time) : );
 	return time;
 }
 
@@ -28,6 +33,7 @@ typedef struct PoissonRate_s
 	float *h_rates_;
 
 }PoissonRate_t;
+
 typedef struct snnInfo_s
 {
 	unsigned int	simTimeMs;
@@ -117,19 +123,19 @@ typedef struct connInfo_s{
 	float p;//conn probability
 }connInfo_t;
 
-#if 1
-int runNetwork(snnInfo_t *snnInfo, grpInfo_t *grpInfo,
-               connInfo_t *connInfo, neurInfo_t *neurInfo,
-               synInfo_t *synInfo_t, swInfo_t *swInfo,
-               int _nmsec, bool printRun);
 
+int runNetwork(snnInfo_t *snnInfo, grpInfo_t *grpInfo,
+    connInfo_t *connInfo, neurInfo_t *neurInfo,
+    synInfo_t *synInfo_t, swInfo_t *swInfo,
+    int _nmsec, bool printRun);
+void NeuronParameter(grpInfo_t *gInfo,int NE,int NI,int NP,snnInfo_t *snnInfo,int delay,int connectnumber);
+void ConnectParameter(connInfo_t *connInfo,int delay,grpInfo_t *gInfo);
 void initNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
-                int numGrp,int numConn,int randSeed);
+    int numGrp,int numConn,int randSeed);
 void setNeuronParameters(grpInfo_t *gInfo,int gid,float izh_a,
-		float izh_a_sd,float izh_b,float izh_b_sd,float izh_c,
-		float izh_c_sd,float izh_d,float izh_d_sd);
-void setConductances(snnInfo_t *sInfo,bool isSet,int tdAMPA,int trNMDA,
-		int tdNMDA,int tdGABAa,int trGABAb,int tdGABAb);
+	float izh_a_sd,float izh_b,float izh_b_sd,float izh_c,
+	float izh_c_sd,float izh_d,float izh_d_sd);
+void setConductances(snnInfo_t *sInfo);
 void createNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo);
 void setupNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo);
 void setRates(PoissonRate_t *ratePtr,int numPois,float rate);
@@ -137,6 +143,6 @@ void setSpikeRate(grpInfo_t *gInfo,int gid,PoissonRate_t* rPtr,int refPeriod);
 void freeNetwork();
 #endif
 
-#endif
+
 
 

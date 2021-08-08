@@ -17,6 +17,10 @@ static __inline long rpcc()
    asm volatile ("rcsr %0,4":"=r"(a));
    return a;
 }
+ #define REG_SYNR(mask) \
+  asm volatile ("synr %0"::"r"(mask))
+ #define REG_SYNC(mask) \
+  asm volatile ("sync %0"::"r"(mask))
 
 __thread_local volatile unsigned int reply,rpl[8];
 __thread_local volatile unsigned int reply_mpi,rpl_mpi[8];
@@ -30,7 +34,7 @@ __thread_local volatile unsigned int NSgroup_slave,NSall_slave;
 __thread_local swInfo_t swInfo;
 __thread_local neurInfo_t *nInfo;
 __thread_local synInfo_t *sInfo;
-
+__thread_local int time_test=0;
 __thread_local dma_desc dma_get_syn;
 __thread_local dma_desc dma_get;
 
@@ -126,11 +130,11 @@ void initSW(swInfo_t *ptr){
 void freeSW(void *ptr){//????
 	int nSpikeAll=0;
 	int i;
-#if 1
+
 	for(i=0;i<swInfo.SizeN;i++){
 		nSpikeAll += nInfo[i].nSpikeCnt;
 	}
-#endif
+
 	reply=0;
 	athread_put(PE_MODE,&cdma,&dma[_MYID],sizeof(int),&reply,0,0);
 	athread_put(PE_MODE,&cspike,&spike[_MYID],sizeof(int),&reply,0,0);
@@ -144,22 +148,16 @@ static int SpikeDmaWrite_mpi(ptr);//mpi
 static int SpikeDmaRead_mpi(ptr);//mpi
 
 void StateUpdate(void *ptr){
-
 	int it;
 	decayConduct(NULL);
-
 	endST_mpi=0; topST_mpi=0; usedST_mpi=0;
-#if 1
 	neuronUpdate_simd();
 	sliceTime+=swInfo.Ndt;
-#endif
 	simTime++;
 	assert(simTime==(sliceTime>>swInfo.Nop));
 	offset += swInfo.Ndt;//ringBuffer offset????????
 	if(offset>=lenRB) offset -= lenRB;
-
 	SpikeDmaWrite_mpi(ptr);//mpi++++
-
 	return;
 }
 
@@ -190,8 +188,6 @@ static void neuronUpdate(int it){
 	double tmpiNMDA, tmpI;
 	double tmpgNMDA, tmpgGABAb;
 	int i=0,j;
-#if 0
-#endif
 	for(i=0;i<swInfo.SizeN;i++) {
 #if 0
 
@@ -246,7 +242,6 @@ static void neuronUpdate(int it){
 			nInfo[i].recovery+=nInfo[i].Izh_d;
 			if(addSpikeToTable_mpi(i)) assert(0);
 		}
-
 	} 
 #if 1
 	int dIndex=offset+it;
@@ -277,7 +272,7 @@ static int addSpikeToTable(int i) {
 	swInfo.fireCnt++;
 	return spikeBufferFull;
 }
-static int addSpikeToTable_mpi(int i) {
+static int addSpikeToTable_mpi(int i){
 	int spikeBufferFull = 0;
 	if(i<swInfo.SizeN) {nInfo[i].nSpikeCnt++;}
 	firingTable_mpi[endST_mpi].nid = i+swInfo.StartN;
@@ -557,8 +552,7 @@ static void neuronUpdate_simd(){
 		}
 	}
 
-#if 0
-#endif
+
 
 }
 #endif
@@ -589,42 +583,61 @@ static int addSpikeToTable_simd_mpi(int i,int it) {
 }
 
 //write firingTable_mpi[] from slave to host memory
+
 static int SpikeDmaWrite_mpi(ptr){//mpi++++
-#if 1
-	int i;
+
+	int i,core_number,all_number=0;
 	//gather slaves spike numbers
 	intv8 numCol = 0;
 	intv8 numRow = 0;
-	int col = (int)COL(_MYID);
-	int row = (int)ROW(_MYID);
+	int col = (_MYID)%8;
+	int row = (_MYID)/8;
 	intv8 _v = 0;
 	((int*)(&numCol))[col] = (int)endST_mpi;
-	if (col!=0){REG_PUTR(numCol,0);}
-	else {
+	
+	if(col==1||col==3||col==5||col==7){
+		REG_PUTR(numCol,col-1);
+	}
+	if(col==0||col==2||col==4||col==6){
 		REG_GETR(_v);numCol |= _v;
+	}
+	if(col==2||col==6){
+		REG_PUTR(numCol,col-2);
+	}
+	if(col==0||col==4){
 		REG_GETR(_v);numCol |= _v;
-		REG_GETR(_v);numCol |= _v;
-		REG_GETR(_v);numCol |= _v;
-		REG_GETR(_v);numCol |= _v;
-		REG_GETR(_v);numCol |= _v;
+	}
+	if(col==4){
+		REG_PUTR(numCol,col-4);
+	}
+	if(col==0){
 		REG_GETR(_v);numCol |= _v;
 		for(i=0;i<8;i++)
 			((int*)(&numRow))[row] += ((int*)(&numCol))[i];
-		
-		if (row!=0){REG_PUTC(numRow,0);}
-		else 
-		{
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-			REG_GETC(_v);numRow |= _v;
-		}
-		if (row==0){REG_PUTC(numRow,8);}
-		else {REG_GETC(numRow);}		
 	}
+
+	if(row==1||row==3||row==5||row==7){
+		REG_PUTC(numRow,row-1);
+	}
+	if(row==0||row==2||row==4||row==6){
+		REG_GETC(_v);numRow |= _v;
+	}
+	if(row==2||row==6){
+		REG_PUTC(numRow,row-2);
+	}
+	if(row==0||row==4){
+		REG_GETC(_v);numRow |= _v;
+	}
+	if(row==4){
+		REG_PUTC(numRow,row-4);
+	}
+	if(row==0){
+		REG_GETC(_v);numRow |= _v;
+	}	
+
+	if (row==0){REG_PUTC(numRow,8);}
+	else {REG_GETC(numRow);}		
+	
 	if (col==0){REG_PUTR(numCol,8);REG_PUTR(numRow,8);}
 	else {REG_GETR(numCol);REG_GETR(numRow);}
     
@@ -632,28 +645,18 @@ static int SpikeDmaWrite_mpi(ptr){//mpi++++
 	long addr = 0,reply = 0;
 	for(i=0;i<col;i++) addr += ((int*)(&numCol))[i];
 	for(i=0;i<row;i++) addr += ((int*)(&numRow))[i];
-#if 1
+
 	if(endST_mpi){
-		athread_put(PE_MODE,
-			&(firingTable_mpi[0]),
-			&(swInfo.firingTableHost[addr]),
-			sizeof(spikeTime_t)*endST_mpi,
-			&reply,0,0);
+		athread_put(PE_MODE,&(firingTable_mpi[0]),&(swInfo.firingTableHost[addr]),sizeof(spikeTime_t)*endST_mpi,&reply,0,0);
 		dmaWait(&reply,1);
 	}
-#endif
 	if(_MYID==0){
 		NSgroup_slave = 0;
 		for(i=0;i<8;i++) NSgroup_slave += ((int*)(&numRow))[i];
 		reply = 0;
-		athread_put(PE_MODE,
-			&(NSgroup_slave),
-			&(NS_group),
-			sizeof(int),
-			&reply,0,0);
+		athread_put(PE_MODE,&(NSgroup_slave),&(NS_group),sizeof(int),&reply,0,0);//发送脉冲数量
 		dmaWait(&reply,1);
 	}
-#endif
 	return 0;
 }
 
@@ -663,15 +666,18 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 	if(_MYID==0){
 		reply = 0;
 		NSall_slave=0;
+		
 		numST_mpi[simTime%swInfo.Ndelay] = 0xfffffff;
 		athread_get(PE_MODE,
 			&(NSall),
 			&(numST_mpi[simTime%swInfo.Ndelay]),
 			sizeof(int),
 			&reply,0,0,0);
+		
 		while(numST_mpi[simTime%swInfo.Ndelay]==0xfffffff);
-
+		
 	}
+	
 	intv8 _v;
 	((int*)(&_v))[0] = numST_mpi[simTime%swInfo.Ndelay];
 	_v = put_get_intv8(_v,0);
@@ -747,14 +753,14 @@ static void CurrentUpdate_mpi(void *ptr){//????
 	intv8 _v[8];
 	srcId = 0;
 	int idelay, iblock,nblock;
-	for(idelay=0; idelay<swInfo.Ndelay; idelay++) {
+	for(idelay=0; idelay<swInfo.Ndelay; idelay++) {//swInfo.Ndelay==1
 		iSpike=topST;
 		ibreak=0;
 		int ivarray=0;
 		while(1){
 			int j,jindex=0;
 			if(srcId==_MYID){
-				int nvarray = lenST_mpi/64;
+				int nvarray = lenST_mpi/64;//lenst_mpi=size+64
 				int length = lenST_mpi/64*64;
 				assert(nvarray>0);
 				if (ivarray%nvarray==0){
@@ -795,8 +801,8 @@ static void CurrentUpdate_mpi(void *ptr){//????
 			}
 			spikeTime_t st,st0;
 			//reply=0;
-#if 0	//twice hiding access, unused
-#endif
+	//twice hiding access, unused
+
 #if 1	//hiding access & reducing synchronization
 long tm0,tm1,tm2,tm3;
 				st=((spikeTime_t*)(&_v[0]))[0];
@@ -855,6 +861,7 @@ cspike+=tm3-tm2;
 	usedST -= numST[imv];
 	numST[imv]=0;
 }
+
 #if 0
 static void CurrentUpdate(void *ptr){//????
 //st3=rpcc();
@@ -868,34 +875,23 @@ static void CurrentUpdate(void *ptr){//????
 		iSpike=topST;
 		ibreak=0;
 		while(1){
-			/*for(i=0;i<8;i++){
-        			((spikeTime_t*)(&_v[0]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[1]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[2]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[3]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[4]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[5]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[6]))[i].nid=0xffff;
-        			((spikeTime_t*)(&_v[7]))[i].nid=0xffff;
-			}*/
 			int j,jindex=0;
 			if(srcId==_MYID){
 				for(j=0;j<8;j++){
-				for(i=0;i<8;i++){
-					if(iSpike==endST) {
-					int ii;
-					for(ii=i;ii<8;ii++)
-        				((spikeTime_t*)(&_v[j]))[ii].nid=0xffff;
-					break;
+					for(i=0;i<8;i++){
+						if(iSpike==endST) {
+						int ii;
+							for(ii=i;ii<8;ii++)
+								((spikeTime_t*)(&_v[j]))[ii].nid=0xffff;
+							break;
+						}
+						//if(iSpike==endST) break;
+							((spikeTime_t*)(&_v[j]))[i]=firingTable[iSpike];
+						iSpike++;
+						if(iSpike>=lenST)iSpike -= lenST;
 					}
-					//if(iSpike==endST) break;
-        				((spikeTime_t*)(&_v[j]))[i]=firingTable[iSpike];
-					iSpike++;
-					if(iSpike>=lenST)iSpike -= lenST;
+					if(jindex) break;
 				}
-				if(jindex) break;
-				}
-			} else {
 			}
 
 			for(j=0;j<8;j++){			
@@ -907,15 +903,15 @@ static void CurrentUpdate(void *ptr){//????
 			spikeTime_t st,st0;
 			//reply=0;
 			
-#if 0	//twice hiding access, unused
-#endif
+	//twice hiding access, unused
+
 #if 1	//hiding access & reducing synchronization
 long tm0,tm1,tm2,tm3;
 				st=((spikeTime_t*)(&_v[0]))[0];
 				if(st.nid!=0xffff){
 				rpl[0]=0;
 {tm0=rpcc();{
-        			dma_set_reply(&dma_get_syn,&rpl[0]);
+        		dma_set_reply(&dma_get_syn,&rpl[0]);
 				synInfo_t *sInfoLc=&sInfo[0];
 				syndma(st,sInfoLc);
 }tm1=rpcc();}
@@ -929,7 +925,7 @@ cdma+=tm1-tm0;
 				if(st.nid==0xffff) {ibreak=1;break;}
 				j=i&(0x07);
 				rpl[j]=0;
-        			dma_set_reply(&dma_get_syn,&rpl[j]);
+        		dma_set_reply(&dma_get_syn,&rpl[j]);
 				synInfo_t *sInfoLc=&sInfo[j*swInfo.Ndma];
 //long tm0,tm1,tm2,tm3;
 {tm0=rpcc();{
@@ -979,8 +975,7 @@ cspike+=tm3-tm2;
 }
 #endif
 static void PoisCurrentUpdate(void *ptr){//????
-#if 0
-#endif
+
 }
 
 static void generatePostSpike(spikeTime_t st,synInfo_t *sInfoLc) 
@@ -989,18 +984,19 @@ static void generatePostSpike(spikeTime_t st,synInfo_t *sInfoLc)
 	int is;
 	int MaxN=swInfo.MaxN;
 	int Ndma=swInfo.Ndma;
-	int Ndelay=swInfo.Ndelay;
+	//printf("%ddam \n",dma);
+	int Ndelay=swInfo.Ndelay; 
 	short occurTime=st.time>>swInfo.Nop;
 	short iD = simTime-occurTime-1;
 	if(!(iD>=0&&iD<Ndelay))iD = 0;
 	for (is=0;is<Ndma;is++){
-	unsigned int post_i = sInfoLc[is].postId;
-	if(post_i==0xffff) break;
-	unsigned int dIndex = st.time+sInfoLc[is].dl-sliceTime+offset;
-	dIndex &= (lenRB-1);
-	float change = sInfoLc[is].wt;
-	int i = post_i&0xf;
-	ringBuffer[i*lenRB+dIndex] += change;
+		unsigned int post_i = sInfoLc[is].postId;
+		if(post_i==0xffff) break;
+		unsigned int dIndex = st.time+sInfoLc[is].dl-sliceTime+offset;
+		dIndex &= (lenRB-1);
+		float change = sInfoLc[is].wt;
+		int i = post_i&0xf;
+		ringBuffer[i*lenRB+dIndex] += change;
 	}
 	return;
 }
@@ -1034,11 +1030,6 @@ static void syndma2(spikeTime_t st,synInfo_t *sInfoLc) {
 	return;
 }
 
-void SnnSim(void *ptr){
-	StateUpdate(ptr);
-	SpikeDeliver(ptr);
-	return;
-}
 #if 1
 static void generatePostSpike_simd(spikeTime_t st,synInfo_t *sInfoLc) {
 	int pre_i=st.nid;

@@ -6,7 +6,7 @@
 #define COMPACTION_ALIGNMENT_PRE  16
 #define COMPACTION_ALIGNMENT_POST 0
 
-extern int timestep;
+extern int g_timestep;
 static float getWeights(grpInfo_t *gInfo,int connProp, float initWt, float maxWt, unsigned int nid, int gid);
 static void connectFull(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo); 
 static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo); 
@@ -17,25 +17,100 @@ static void updateSpikeGeneratorsInit(grpInfo_t* grpInfo, int numGrp);
 static int updateSpikeTables(snnInfo_t *s);
 
 
-void setConductances(snnInfo_t *sInfo, bool isSet, int tdAMPA, int trNMDA, int tdNMDA, int tdGABAa, int trGABAb, int tdGABAb)
+void setConductances(snnInfo_t *sInfo)
 {
-	if (isSet) 
-	{
-		assert(tdAMPA>0); assert(tdNMDA>0); assert(tdGABAa>0); assert(tdGABAb>0);
-		assert(trNMDA>=0); assert(trGABAb>=0); // 0 to disable rise times
-		assert(trNMDA!=tdNMDA); assert(trGABAb!=tdGABAb); // singularity
-	}
+	//删除了判断语句
+	int tdAMPA=5,tdNMDA=150,tdGABAa=6,tdGABAb=150;
+	bool isConductivityMode = 1;//COBA or CUBA (true or false)
 
 	// set conductances globally for all connections
-	sInfo->sim_with_conductances  |= isSet;
+	sInfo->sim_with_conductances  |= isConductivityMode;
 	sInfo->dAMPA  = 1.0-1.0/tdAMPA;
 	sInfo->dNMDA  = 1.0-1.0/tdNMDA;
 	sInfo->dGABAa = 1.0-1.0/tdGABAa;
 	sInfo->dGABAb = 1.0-1.0/tdGABAb;
 }
 
+void NeuronParameter(grpInfo_t *gInfo,int NE,int NI,int NP,snnInfo_t *sInfo,int delay,int connectnumber){
+	int NReg=NE+NI; int NInput=NP; int NPre=NReg+NInput;
+	float a,b,c,d,a_sd,b_sd,c_sd,d_sd;
+	
+	int i=0;
+	gInfo[i].SizeN = NE;
+	gInfo[i].StartN= 0; 
+	gInfo[i].EndN = gInfo[i].StartN+gInfo[i].SizeN-1;
+	a   =0.02; b   =0.2; c   =-65; d   =8.0;
+	a_sd=0.0 ; b_sd=0.0; c_sd=0.0;  d_sd=0.0;
+	setNeuronParameters(gInfo,i,a,a_sd,b,b_sd,c,c_sd,d,d_sd);
+
+	i++;
+	gInfo[i].SizeN = NI;
+	gInfo[i].StartN= gInfo[i-1].EndN+1;
+	gInfo[i].EndN = gInfo[i].StartN+gInfo[i].SizeN-1;
+	a   =0.02; b   =0.2; c   =-65; d   =8.0;
+	a_sd=0.0 ; b_sd=0.0; c_sd=0.0;  d_sd=0.0;
+	setNeuronParameters(gInfo,i,a,a_sd,b,b_sd,c,c_sd,d,d_sd);
+
+	i++;
+	gInfo[i].SizeN = NP;
+	gInfo[i].StartN= gInfo[i-1].EndN+1;
+	gInfo[i].EndN = gInfo[i].StartN+gInfo[i].SizeN-1;
+	a   =0.02; b   =0.2; c   =-65; d   =8.0;
+	a_sd=0.0 ; b_sd=0.05; c_sd=0.0;  d_sd=0.0;
+	setNeuronParameters(gInfo,i,a,a_sd,b,b_sd,c,c_sd,d,d_sd);
+	gInfo[i].isSpikeGenerator=1;//for poisson
+
+	sInfo->numGrp=3;
+	sInfo->numN=gInfo[2].EndN+1;
+	sInfo->numNExcReg=gInfo[0].SizeN;
+	sInfo->numNInhReg=gInfo[1].SizeN;
+	sInfo->numNReg=gInfo[0].SizeN+gInfo[1].SizeN;
+	sInfo->numNPois=gInfo[2].SizeN;
+	sInfo->maxDelay=delay;//
+	sInfo->Nsyn = connectnumber; //connection number
+}
+
+void ConnectParameter(connInfo_t *connInfo,int delay,grpInfo_t *gInfo){
+	int minD,maxD; 
+	double minW,maxW,initW;
+	int gSrc,gDest;
+	/*******conn para******/
+	int DL = delay;
+	assert(DL>=2);
+	minD=1; maxD=DL; minW=0.0;initW=0.000001;maxW=0.000001;
+	gSrc=0;gDest=0;
+	int j=0;
+	connInfo[j].connId=j;
+	connInfo[j].grpSrc=gSrc;
+	connInfo[j].grpDest=gDest;
+	connInfo[j].maxDelay=maxD;
+	connInfo[j].initWt=initW;
+	connInfo[j].maxWt=maxW;
+	connInfo[j].p=1.;
+	connInfo[j].maxSynPost=gInfo[gDest].SizeN-1;
+	connInfo[j].maxSynPre=gInfo[gSrc].SizeN-1;
+	connInfo[j].numSyn=gInfo[gSrc].SizeN*(gInfo[gSrc].SizeN-1);
+	
+	/*******conn para******/
+	//NP->NE
+	minD=1; maxD=DL; minW=0.000;initW=0.0005;maxW=0.0005;
+	gSrc=1;gDest=0;
+	j++;
+	connInfo[j].connId=j;
+	connInfo[j].grpSrc=gSrc;
+	connInfo[j].grpDest=gDest;
+	connInfo[j].maxDelay=maxD;
+	connInfo[j].initWt=initW;
+	connInfo[j].maxWt=maxW;
+	connInfo[j].p=1.;
+	connInfo[j].maxSynPost=gInfo[gDest].SizeN;
+	connInfo[j].maxSynPre=gInfo[gSrc].SizeN;
+	connInfo[j].numSyn=gInfo[gSrc].SizeN*gInfo[gDest].SizeN;
+}
+
 // set Izhikevich parameters for group
-void setNeuronParameters(grpInfo_t *gInfo,int gid,float izh_a,float izh_a_sd,float izh_b,float izh_b_sd,float izh_c,float izh_c_sd,float izh_d,float izh_d_sd)
+void setNeuronParameters(grpInfo_t *gInfo,int gid,float izh_a,float izh_a_sd,float izh_b,float izh_b_sd,
+    float izh_c,float izh_c_sd,float izh_d,float izh_d_sd)
 {
 	assert(gid>=0);
 	assert(izh_a_sd>=0);assert(izh_b_sd>=0);
@@ -127,27 +202,19 @@ static void connectFull(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo) {
 }
 
 void initNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
-		int numGrp,int numConn,int randSeed){
+	int numGrp,int numConn,int randSeed){
 	int i,g;
 
 	srand48(randSeed); sInfo->randSeed=randSeed;
-
 	sInfo->simTimeMs = 0; sInfo->simTimeSec = 0; sInfo->simTimeMs = 0;
-
 	sInfo->maxDelay = 1; //sInfo->maxDelay_= 1;
-
 	sInfo->numGrp = numGrp;	sInfo->numConn= numConn;
-
 	sInfo->numN = 0; sInfo->numNReg = 0; 
 	sInfo->numNExcReg = 0; sInfo->numNInhReg = 0; sInfo->numNPois = 0;
-
 	sInfo->maxSpikesD1 = 0; sInfo->maxSpikesD2 = 0;
-
 	sInfo->simTimeRunStart = 0; sInfo->simTimeRunStop = 0;
-	
 	sInfo->secD1fireCntHost = 0; sInfo->secD2fireCntHost = 0;
 	sInfo->spikeCountAll1secHost = 0;
-	
 	sInfo->MaxFiringRate = 60;//60Hz ????
 	sInfo->sim_with_homeostasis = 0; sInfo->sim_with_conductances = 1;
 	sInfo->sim_with_NMDA_rise = 0; sInfo->sim_with_GABAb_rise = 0;
@@ -159,10 +226,8 @@ void initNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 	sInfo->dGABAa = 1.0-1.0/6.0;
 	sInfo->rGABAb = 1.0-1.0/100.0; sInfo->dGABAb = 1.0-1.0/150.0;
 	sInfo->sGABAb = 1.0;
-
 	sInfo->timeTableD1 = NULL; sInfo->timeTableD2 = NULL;
 	sInfo->firingTableD1 = NULL; sInfo->timeTableD2 = NULL;
-
 	sInfo->nSpikeCnt = NULL; sInfo->lastSpikeTime = NULL;
 	
 	for (i=0;i<numGrp;i++)
@@ -176,9 +241,7 @@ void initNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 		gInfo[i].isSpikeGenerator= 0;gInfo[i].NewTimeSlice = 0;
 		gInfo[i].CurrTimeSlice = 0;gInfo[i].SliceUpdateTime = 0;
 		gInfo[i].RefractPeriod = 0;gInfo[i].RatePtr = NULL;
-
 		gInfo[i].WithSTP = 0;gInfo[i].WithHomeostasis = 0;
-		
 		gInfo[i].numSynPre = 0;	gInfo[i].numSynPost = 0;
 
 		gInfo[i].Izh_a = 0.; gInfo[i].Izh_a_sd = 0.;
@@ -303,9 +366,9 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 	sInfo->Ndelay=sInfo->maxDelay-1;
 	if(sInfo->Ndelay==0) assert(0);
 	
-	sInfo->Ndt = timestep;
+	sInfo->Ndt = g_timestep;
 	//sInfo->Nop = (int)(log2(timestep));
-	sInfo->Nop = (int)(log(timestep)/log(2));
+	sInfo->Nop = (int)(log(g_timestep)/log(2));
 	sInfo->dt=1.0/sInfo->Ndt;
 	
 
