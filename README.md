@@ -23,7 +23,7 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
   
 - This is part of `Makefile`, the program operating parameters can be changed
 
-   ` bsub -b -I -q q_sw_expr -n 56 -np 4 -cgsp 64 -host_stack 256 -share_size 4096 ./swtest 10000 200000 2 0.125 1000 5.5`
+   ` bsub -b -I -q q_sw_expr -n 56 -np 4 -cgsp 64 -host_stack 256 -share_size 4096 ./main 10000 200000 2 0.125 1000 5.5`
 
    The first parameter: The number of synapses connected to each neuron  
    The second parameter: Number of neurons  
