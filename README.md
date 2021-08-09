@@ -15,29 +15,22 @@ SW26010 is a many-core accelerator, whose cores are independent of each other, a
     make
 ```
 
-- Grant shell file permissions 
+- Run SWsnn on TaihuLight supercomputer
 
 ```bash
-    chmod +x run.sh
+    make run
 ```
+  
+- This is part of `Makefile`, the program operating parameters can be changed
 
-- Run SWsnn on  TaihuLight supercomputer
-    - Run an existing program 
+   ` bsub -b -I -q q_sw_expr -n 56 -np 4 -cgsp 64 -host_stack 256 -share_size 4096 ./swtest 10000 200000 2 0.125 1000 5.5`
 
-    ```bash
-        ./run.sh
-    ```
-    
-    - This is the code in `run.sh`, the program operating parameters can be changed
-    
-       ` bsub -b -I -q q_sw_expr -n 56 -np 4 -cgsp 64 -host_stack 256 -share_size 4096 ./swtest 10000 200000 2 0.125 1000 5.5`
-       
-       The first parameter: The number of synapses connected to each neuron  
-       The second parameter: Number of neurons  
-       The third parameter: Max delay  
-       The fourth parameter: Time step(The time step can only be the reciprocal of the power of two)  
-       The fifth parameter: Simulation time  
-       The sixth parameter: Input current parameters 
+   The first parameter: The number of synapses connected to each neuron  
+   The second parameter: Number of neurons  
+   The third parameter: Max delay  
+   The fourth parameter: Time step(The time step can only be the reciprocal of the power of two)  
+   The fifth parameter: Simulation time  
+   The sixth parameter: Input current parameters 
        
        
        
