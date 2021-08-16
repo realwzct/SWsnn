@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 	grpInfo_t *grpInfo=(grpInfo_t*)malloc(numGrp*sizeof(grpInfo_t));
 	connInfo_t *connInfo=(connInfo_t*)malloc(numConn*sizeof(connInfo_t));
 
-	long time0,time1,time2;
+	volatile long time0,time1,time2;
 	time0=rpcc();
 
 	//initNetwork(&snnInfo,grpInfo,connInfo,numGrp,numConn,randSeed);//初始化网络，但这段没啥用
@@ -46,7 +46,6 @@ int main(int argc, char *argv[])
 	MPI_Barrier(MPI_COMM_WORLD);//mpi syn
 	
 	time1=rpcc();
-
 	runNetwork(&snnInfo,grpInfo,connInfo,snnInfo.nInfoHost,snnInfo.sInfoHost,snnInfo.swInfo,simulatetime,0);
 	time2=rpcc();
 

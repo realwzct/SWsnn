@@ -24,7 +24,7 @@ extern SLAVE_FUN(SpikeDeliver)(void*);
 static bool updateTime(snnInfo_t *snnInfo);
 static void doSnnSim(snnInfo_t*,grpInfo_t*,connInfo_t*,neurInfo_t*,synInfo_t*, swInfo_t*);
 extern int rank,nproc;
-static long t1=0,t2=0,t3=0;
+volatile static long t1=0,t2=0,t3=0;
 
 int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t *nInfo,
     synInfo_t *synInfo, swInfo_t *swInfo,int _nmsec, bool printRun) 
@@ -75,7 +75,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t 
 static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, 
     neurInfo_t *nInfo,synInfo_t *synInfo, swInfo_t *swInfo) 
 {
-	long time0,time1,time2,time3;
+	volatile long time0,time1,time2,time3;
 
 	{time0 = rpcc();}
 	athread_spawn(StateUpdate,swInfo);
@@ -83,7 +83,6 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 	{time1 = rpcc();}
 	sInfo->simTime++;
 
-	
 	int iND = sInfo->simTime%sInfo->Ndelay;
 
 	spikeTime_t *sendBuf, *recvBuf;

@@ -461,10 +461,6 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 #endif
 	/*******set syn and neur*******/
 	int gid;
-	assert(gInfo[0].StartN==0);
-	assert(gInfo[0].EndN+1==gInfo[1].StartN);
-	assert(gInfo[1].EndN+1==sInfo->numNReg);
-	assert(sInfo->numGrp==3);
 	for(gid=0;gid<2;gid++){
 		for(i=gInfo[gid].StartN;i<=gInfo[gid].EndN;i++){
 			if(i<sInfo->gStart||i>=sInfo->gStart+sInfo->gSize) continue;
@@ -520,10 +516,6 @@ void createNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){
 	return;
 }
 
-void setupNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo) 
-{
-}
-
 static void resetNeuron(neurInfo_t *nInfo,int n,grpInfo_t *gInfo,int g) 
 {
 	nInfo[n].Izh_a=gInfo[g].Izh_a+gInfo[g].Izh_a_sd*(float)drand48();
@@ -538,5 +530,5 @@ static void resetNeuron(neurInfo_t *nInfo,int n,grpInfo_t *gInfo,int g)
 	nInfo[n].gGABAb_d = 0.;
 }
 
-
+//这段代码结果未发生变化
 

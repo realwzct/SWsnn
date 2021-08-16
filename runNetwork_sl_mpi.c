@@ -10,66 +10,72 @@
 
 #define COND_INTEGRATION_SCALE        2
 
-static __inline long rpcc()
-{
-   long a;
-   asm volatile ("memb");
-   asm volatile ("rcsr %0,4":"=r"(a));
-   return a;
-}
+
  #define REG_SYNR(mask) \
   asm volatile ("synr %0"::"r"(mask))
  #define REG_SYNC(mask) \
   asm volatile ("sync %0"::"r"(mask))
 
 __thread_local volatile unsigned int reply,rpl[8];
-__thread_local volatile unsigned int reply_mpi,rpl_mpi[8];
-__thread_local volatile unsigned int st0,ed0,result;
+__thread_local volatile unsigned int st0;
 __thread_local volatile unsigned int cdma,cspike;
-__thread_local volatile unsigned int cdma_mpi,cspike_mpi;
-extern volatile unsigned int dma[64],spike[64],NS_group,NSall,numSpike[64];
-extern float currentfactor;
-__thread_local volatile unsigned int NSgroup_slave,NSall_slave;
-
+__thread_local volatile unsigned int NSgroup_slave;
 __thread_local swInfo_t swInfo;
 __thread_local neurInfo_t *nInfo;
 __thread_local synInfo_t *sInfo;
 __thread_local int time_test=0;
 __thread_local dma_desc dma_get_syn;
 __thread_local dma_desc dma_get;
+__thread_local spikeTime_t *firingTable;
+__thread_local spikeTime_t *firingTable_mpi;
+__thread_local float *ringBuffer;
+__thread_local float *neuronPara;
+__thread_local int simTime,sliceTime;
+__thread_local int lenRB,offset;
+__thread_local int lenRB_mpi,offset_mpi;
+__thread_local int lenST,topST,endST,usedST,numST[20];
+__thread_local volatile int lenST_mpi,topST_mpi,endST_mpi,usedST_mpi,numST_mpi[20];
+__thread_local volatile int t1;
+__thread_local float Izh_a,Izh_b,Izh_c,Izh_d;
+__thread_local int recovery,voltage,gAMPA,gNMDA_d,gGABAa,gGABAb_d,neuronSizeN;
 
+extern volatile unsigned int dma[64],spike[64],NS_group,NSall,numSpike[64];
+extern float currentfactor;
+extern int rank;
 static void generatePostSpike(spikeTime_t st,synInfo_t *sInfoLc);
 static void generatePostSpike_simd(spikeTime_t st,synInfo_t *sInfoLc);
 static int addSpikeToTable(int i);
 static int addSpikeToTable_simd(int,int);
 static int addSpikeToTable_mpi(int i);
 static int addSpikeToTable_simd_mpi(int,int);
-
-__thread_local spikeTime_t *firingTable;
-__thread_local spikeTime_t *firingTable_mpi;
-__thread_local float *ringBuffer;
-__thread_local int simTime,sliceTime;
-__thread_local int simTime_mpi,sliceTime_mpi;
-__thread_local int lenRB,offset;
-__thread_local int lenRB_mpi,offset_mpi;
-
-__thread_local int lenST,topST,endST,usedST,numST[20];
-__thread_local volatile int lenST_mpi,topST_mpi,endST_mpi,usedST_mpi,numST_mpi[20];
-
 static void decayConduct(void *ptr);
-static void neuronUpdate(int it);
 static void neuronUpdate_simd();
+static void neuronUpdate_simd_wzc();
 static void CurrentUpdate(void *ptr);
 static void CurrentUpdate_mpi(void *ptr);
 static void PoisCurrentUpdate(void *ptr);
+static int SpikeDmaWrite_mpi(ptr);//mpi
+static int SpikeDmaRead_mpi(ptr);//mpi
+#define dvdtIzh_simd(v,u,tmpI,h) (((v0_04*(v)+v5_0)*(v)+v140_0-(u)+(tmpI))*(h))
+#define dudtIzh_simd(v,u,a,b,h) ((a)*((b)*(v)-(u))*(h))
+inline float dvdtIzh(float v, float u, float tmpI, float h);
+inline float dudtIzh(float v, float u, float a, float b, float h);
 
+inline float dvdtIzh(float v, float u, float tmpI, float h) {
+	return (((0.04*v+5.0)*v+140.0-u+tmpI)*h);
+}
+
+// single integration step for recovery equation of 4-param Izhikevich
+inline float dudtIzh(float v, float u, float a, float b, float h) {
+ 	return (a*(b*v-u)*h);
+}
 void initSW(swInfo_t *ptr){
 
-	int i;
+	int i;t1=0;
+	Izh_a=0.02;Izh_b=0.2;Izh_c=-65;Izh_d=8.0;
 	cdma=0;cspike=0;
-	cdma_mpi=0;cspike_mpi=0;
 	simTime=0,sliceTime=0;lenRB=0;
-	simTime_mpi=0,sliceTime_mpi=0;lenRB_mpi=0;
+	lenRB_mpi=0;
 	lenST=0; topST=0; endST=0; usedST=0;
 	lenST_mpi=0; topST_mpi=0; endST_mpi=0; usedST_mpi=0;
 	for(i=0;i<20;i++) numST[i]=0;
@@ -86,13 +92,16 @@ void initSW(swInfo_t *ptr){
 	lenRB_mpi=2*swInfo.Ndt; offset_mpi=0;
 	lenST_mpi=SizeN+64;//spikeTime buffer
 
-	if(_MYID==NTh-1) lenST+=100;
-	if(_MYID==NTh-1) lenST_mpi+=100;
+	if(_MYID==NTh-1) {lenST+=100;}
+	if(_MYID==NTh-1) {lenST_mpi+=100;}
 	/*****allocate mem********/
+
 	nInfo=(neurInfo_t*)ldm_malloc(SizeN*sizeof(neurInfo_t)); //?????
 	sInfo=(synInfo_t*)ldm_malloc(8*swInfo.Ndma*sizeof(synInfo_t));
 	firingTable_mpi=(spikeTime_t*)ldm_malloc(lenST_mpi*sizeof(spikeTime_t));
 	ringBuffer=(float*)ldm_malloc(lenRB*SizeN*sizeof(float));
+	neuronSizeN = (SizeN/4+1)*4;
+	neuronPara=(float*)ldm_malloc(6*neuronSizeN*sizeof(float));
 	assert(sizeof(spikeTime_t)==4);
 	assert(sizeof(synInfo_t)==8);
 	for(i=0;i<lenST;i++){
@@ -103,29 +112,42 @@ void initSW(swInfo_t *ptr){
 	memset(nInfo,0,SizeN*sizeof(neurInfo_t));//init zero
 
 	dma_set_size(&dma_get_syn,swInfo.Ndma*sizeof(synInfo_t));
-        dma_set_op(&dma_get_syn,DMA_GET);
-        dma_set_reply(&dma_get_syn,&reply);
-        dma_set_mode(&dma_get_syn,PE_MODE);
-        dma_set_bsize(&dma_get_syn,0);
-        dma_set_stepsize(&dma_get_syn,0);
+	dma_set_op(&dma_get_syn,DMA_GET);
+	dma_set_reply(&dma_get_syn,&reply);
+	dma_set_mode(&dma_get_syn,PE_MODE);
+	dma_set_bsize(&dma_get_syn,0);
+	dma_set_stepsize(&dma_get_syn,0);
 
 	dma_set_size(&dma_get,SizeN*sizeof(neurInfo_t));//need reset
-        dma_set_op(&dma_get,DMA_GET);
-        dma_set_reply(&dma_get,&reply);
-        dma_set_mode(&dma_get,PE_MODE);
-        dma_set_bsize(&dma_get,0);
-        dma_set_stepsize(&dma_get,0);
+	dma_set_op(&dma_get,DMA_GET);
+	dma_set_reply(&dma_get,&reply);
+	dma_set_mode(&dma_get,PE_MODE);
+	dma_set_bsize(&dma_get,0);
+	dma_set_stepsize(&dma_get,0);
 
 	reply=0;
 	dma(dma_get,&(swInfo.nInfoHost[swInfo.StartN-swInfo.gStart]),&nInfo[0]);
-        dma_wait(&reply,1);
+    dma_wait(&reply,1);
+	 
+	recovery=0;voltage=1;gAMPA=2;gNMDA_d=3;gGABAa=4;gGABAb_d=5;
 
-	for(i=0;i<swInfo.SizeN;i++){
-		nInfo[i].nSpikeCnt=0;
+	for(i=0;i<SizeN;i++){
+		neuronPara[recovery*neuronSizeN+i] = nInfo[i].recovery;
+		neuronPara[voltage*neuronSizeN+i] = nInfo[i].voltage;
+		neuronPara[gAMPA*neuronSizeN+i] = nInfo[i].gAMPA;
+		neuronPara[gNMDA_d*neuronSizeN+i] = nInfo[i].gNMDA_d;
+		neuronPara[gGABAa*neuronSizeN+i] = nInfo[i].gGABAa;
+		neuronPara[gGABAb_d*neuronSizeN+i] = nInfo[i].gGABAb_d;
 	}
-        swInfo.nSpikePoisAll=0;
+    swInfo.nSpikePoisAll=0;
+	if(_MYID==0&&rank==0){
+		int i=7;
+		//printf("%f %f %f %f\n",nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d);
+		//printf("shuzu%f %f %f %f\n",neuronPara[gNMDA_d*SizeN+i],neuronPara[gNMDA_d*SizeN+i+1],neuronPara[gNMDA_d*SizeN+i+2],neuronPara[gNMDA_d*SizeN+i+3]);
+	}
 	return;	
-}
+
+}  
 
 void freeSW(void *ptr){//????
 	int nSpikeAll=0;
@@ -134,24 +156,27 @@ void freeSW(void *ptr){//????
 	for(i=0;i<swInfo.SizeN;i++){
 		nSpikeAll += nInfo[i].nSpikeCnt;
 	}
-
+	if(_MYID==0&&rank==0){
+		printf("decayConduct: %.4lf ms\n", (double)(t1)*1000/(1.45e9));
+	}
 	reply=0;
 	athread_put(PE_MODE,&cdma,&dma[_MYID],sizeof(int),&reply,0,0);
 	athread_put(PE_MODE,&cspike,&spike[_MYID],sizeof(int),&reply,0,0);
 	athread_put(PE_MODE,&nSpikeAll,&numSpike[_MYID],sizeof(int),&reply,0,0);
 	while(reply!=3);
-	
 	return;
 }
 
-static int SpikeDmaWrite_mpi(ptr);//mpi
-static int SpikeDmaRead_mpi(ptr);//mpi
-
 void StateUpdate(void *ptr){
 	int it;
+	volatile time1,time2;
+
+	{time1 = rpcc();}
 	decayConduct(NULL);
+	{time2 = rpcc();}
+	t1 = time2-time1+t1;
 	endST_mpi=0; topST_mpi=0; usedST_mpi=0;
-	neuronUpdate_simd();
+	neuronUpdate_simd_wzc();
 	sliceTime+=swInfo.Ndt;
 	simTime++;
 	assert(simTime==(sliceTime>>swInfo.Nop));
@@ -164,102 +189,45 @@ void StateUpdate(void *ptr){
 static void decayConduct(void *ptr){
 
 	int i=0;
-        for(i=0; i<swInfo.SizeN; i++) {
+	int SizeN=swInfo.SizeN;
+	int sim_with_conductances=swInfo.sim_with_conductances;
+	float dAMPA=swInfo.dAMPA;
+	float dGABAa=swInfo.dGABAa;
+	float dNMDA=swInfo.dNMDA;
+	float dGABAb=swInfo.dGABAb;
 
-                if (swInfo.sim_with_conductances) {
-                        nInfo[i].gAMPA*=swInfo.dAMPA;
-                        nInfo[i].gGABAa*=swInfo.dGABAa;
-                        nInfo[i].gNMDA_d*=swInfo.dNMDA;//instantaneous rise
-                        nInfo[i].gGABAb_d*=swInfo.dGABAb;//instantaneous rise
-                }
-                else {
-                        nInfo[i].gAMPA=0.0f; //in CUBA current,sum up all wts
-                }
-        }
-
+	for(i=0; i<SizeN; i++) {
+			if (sim_with_conductances) {
+					nInfo[i].gAMPA*=dAMPA;
+					neuronPara[gGABAa*neuronSizeN+i]*=dGABAa;
+					neuronPara[gNMDA_d*neuronSizeN+i]*=dNMDA;//instantaneous rise
+					neuronPara[gGABAb_d*neuronSizeN+i]*=dGABAb;//instantaneous rise					
+			}
+			else {
+					nInfo[i].gAMPA=0.0f; //in CUBA current,sum up all wts
+			}
+	}
 	return;
 }
+// static void decayConduct(void *ptr){
 
-inline float dvdtIzh(float v, float u, float tmpI, float h);
-inline float dudtIzh(float v, float u, float a, float b, float h);
-#if 1
-static void neuronUpdate(int it){
+// 	int i=0;
+//         for(i=0; i<swInfo.SizeN; i++) {
 
-	double tmpiNMDA, tmpI;
-	double tmpgNMDA, tmpgGABAb;
-	int i=0,j;
-	for(i=0;i<swInfo.SizeN;i++) {
-#if 0
+//                 if (swInfo.sim_with_conductances) {
+//                         nInfo[i].gAMPA*=swInfo.dAMPA;
+//                         nInfo[i].gGABAa*=swInfo.dGABAa;
+//                         nInfo[i].gNMDA_d*=swInfo.dNMDA;//instantaneous rise
+//                         nInfo[i].gGABAb_d*=swInfo.dGABAb;//instantaneous rise
+//                 }
+//                 else {
+//                         nInfo[i].gAMPA=0.0f; //in CUBA current,sum up all wts
+//                 }
+//         }
 
-#else
+// 	return;
+// }
 
-		if (swInfo.sim_with_conductances) {
-			float volt = -60.0;
-			tmpiNMDA=(volt+80.0)*(volt+80.0)/60.0/60.0;
-
-			tmpgNMDA=nInfo[i].gNMDA_d;
-			tmpgGABAb=nInfo[i].gGABAb_d;
-
-			tmpI=-(nInfo[i].gAMPA*(volt-0)
-				 +tmpgNMDA*tmpiNMDA/(1+tmpiNMDA)*(volt-0)
-				 +nInfo[i].gGABAa*(volt+70)
-				 +tmpgGABAb*(volt+90));
-		} else {
-			tmpI=nInfo[i].gAMPA;
-		}
-
-#endif
-		/* 4th Runge-Kutta */
-
-		float v = nInfo[i].voltage;
-		float u = nInfo[i].recovery;
-		float h = swInfo.dt;
-		float a = nInfo[i].Izh_a;
-		float b = nInfo[i].Izh_b;
-
-		float k1 = dvdtIzh(v, u, tmpI, h);
-		float l1 = dudtIzh(v, u, a, b, h);
-
-		float k2 = dvdtIzh(v+0.5*k1, u+0.5*l1, tmpI, h);
-		float l2 = dudtIzh(v+0.5*k1, u+0.5*l1, a, b, h);
-
-		float k3 = dvdtIzh(v+0.5*k2, u+0.5*l2, tmpI, h);
-		float l3 = dudtIzh(v+0.5*k2, u+0.5*l2, a, b, h);
-
-		float k4 = dvdtIzh(v+k3, u+l3, tmpI, h);
-		float l4 = dudtIzh(v+k3, u+l3, a, b, h);
-		v += (k1+2.0*k2+2.0*k3+k4)/6.0;
-		if (v > 30.0) v = 30.0;
-		if (v < -90.0) v = -90.0;
-
-		u += (l1+2.0*l2+2.0*l3+l4)/6.0;
-
-		nInfo[i].voltage = v;
-		nInfo[i].recovery= u;
-		/*** findFiring ***/
-		if (nInfo[i].voltage>= 30.0) {
-			nInfo[i].voltage = nInfo[i].Izh_c;
-			nInfo[i].recovery+=nInfo[i].Izh_d;
-			if(addSpikeToTable_mpi(i)) assert(0);
-		}
-	} 
-#if 1
-	int dIndex=offset+it;
-	assert(dIndex<lenRB);
-	for(i=0;i<swInfo.SizeN;i++){
-		int addr = i*lenRB + dIndex;
-		if (swInfo.sim_with_conductances) {
-			nInfo[i].gAMPA += ringBuffer[addr];
-			nInfo[i].gNMDA_d += ringBuffer[addr];
-		} else {
-			assert(0);
-		}
-		ringBuffer[addr]=0.;
-	}
-#endif
-
-}
-#endif
 static int addSpikeToTable(int i) {
 	int spikeBufferFull = 0;
 	if(i<swInfo.SizeN) {nInfo[i].nSpikeCnt++;}
@@ -285,17 +253,237 @@ static int addSpikeToTable_mpi(int i){
 	return spikeBufferFull;
 }
 
-inline float dvdtIzh(float v, float u, float tmpI, float h) {
-	return (((0.04*v+5.0)*v+140.0-u+tmpI)*h);
-}
+static void neuronUpdate_simd_wzc(){
 
-// single integration step for recovery equation of 4-param Izhikevich
-inline float dudtIzh(float v, float u, float a, float b, float h) {
- 	return (a*(b*v-u)*h);
-}
+	int i=0,j,it;
+	floatv4 viNMDA, vtmpI;
+	floatv4 vgNMDA, vgGABAb;
+	int SizeN=swInfo.SizeN;
+	floatv4 vgAMPA,vgGABAa;
+	floatv4 vv;
+	floatv4 vu;
+	float tmpgNMDA_d[4],tmpgGABAb[4];
+	float tmpgAMPA[4],tmpgGABAa[4];
+	float tmpv[4],tmpu[4];
+	floatv4 vh = swInfo.dt;
+	floatv4 va = Izh_a;
+	floatv4 vb = Izh_b;
+	floatv4 v2_0=2.0,v6_0=6.0;
+	floatv4 v0_5=0.5,v0_04=0.04,v5_0=5.0,v140_0=140.0;
+	floatv4 vvolt = -60.0;
+	floatv4 aa = 80.0,bb=60.0,cc=70.0,dd=90.0,ee=0.0,ff=1.;
+	int sim_with_conductances=swInfo.sim_with_conductances;
 
-#define dvdtIzh_simd(v,u,tmpI,h) (((v0_04*(v)+v5_0)*(v)+v140_0-(u)+(tmpI))*(h))
-#define dudtIzh_simd(v,u,a,b,h) ((a)*((b)*(v)-(u))*(h))
+	for(i=0;i<(SizeN/4)*4;i+=4) {
+		
+		if(_MYID==0&&rank==0){
+			//printf("%f %f %f %f\n",nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d);
+			//printf("shuzu%f %f %f %f\n",nInfo[i].gNMDA_d,nInfo[i+1].gNMDA_d,nInfo[i+2].gNMDA_d,nInfo[i+3].gNMDA_d);
+		}
+		simd_load(vgNMDA,&(neuronPara[gNMDA_d*neuronSizeN+i]));
+		simd_load(vgGABAb,&(neuronPara[gGABAb_d*neuronSizeN+i]));
+		simd_load(vgGABAa,&(neuronPara[gGABAa*neuronSizeN+i]));
+		vgAMPA =simd_set_floatv4(nInfo[i].gAMPA,nInfo[i+1].gAMPA,nInfo[i+2].gAMPA,nInfo[i+3].gAMPA);
+		simd_load(vv,&(neuronPara[voltage*neuronSizeN+i]));
+		simd_load(vu,&(neuronPara[recovery*neuronSizeN+i]));
+
+		for(it=0;it<swInfo.Ndt;it++){
+			if (sim_with_conductances) {
+				viNMDA = (vvolt+aa)*(vvolt+aa)/(bb*bb);
+				vtmpI=ee-(vgAMPA*(vvolt-ee)
+					+vgNMDA*viNMDA/(ff+viNMDA)*(vvolt-ee)
+					+vgGABAa*(vvolt+cc)
+					+vgGABAb*(vvolt+dd));
+			} else {
+				vtmpI=vgAMPA;
+			}
+			
+			/* 4th Runge-Kutta */
+			//float k1,k2,k3,k4;
+			//float l1,l2,l3,l4;			
+			floatv4 vk1 = dvdtIzh_simd(vv, vu, vtmpI, vh);
+			floatv4 vl1 = dudtIzh_simd(vv, vu, va, vb, vh);
+			floatv4 vk2 = dvdtIzh_simd(vv+v0_5*vk1, vu+v0_5*vl1, vtmpI, vh);
+			floatv4 vl2 = dudtIzh_simd(vv+v0_5*vk1, vu+v0_5*vl1, va, vb,vh);
+			floatv4 vk3 = dvdtIzh_simd(vv+v0_5*vk2, vu+v0_5*vl2, vtmpI, vh);
+			floatv4 vl3 = dudtIzh_simd(vv+v0_5*vk2, vu+v0_5*vl2, va, vb,vh);
+			floatv4 vk4 = dvdtIzh_simd(vv+vk3, vu+vl3, vtmpI, vh);
+			floatv4 vl4 = dudtIzh_simd(vv+vk3, vu+vl3, va, vb, vh);			
+			vv += (vk1+v2_0*vk2+v2_0*vk3+vk4)/v6_0;
+			vu += (vl1+v2_0*vl2+v2_0*vl3+vl4)/v6_0;
+			simd_store(vu,&(tmpu[0]));
+			simd_store(vv,&(tmpv[0]));
+
+			for(j=0;j<4;j++){
+				if(tmpv[j]<-90.0) {
+					tmpv[j] = -90.0;
+				}
+				if (tmpv[j]>= 30.0) {
+					tmpv[j] = Izh_c;
+					tmpu[j]+= Izh_d;
+					if(addSpikeToTable_simd_mpi(i+j,it)) assert(0);//????
+				}
+			}
+
+			simd_load(vv,&(tmpv[0]));
+			simd_load(vu,&(tmpu[0]));
+			simd_store(vgAMPA,&(tmpgAMPA[0]));
+			simd_store(vgNMDA,&(tmpgNMDA_d[0]));
+
+			int dIndex=offset+it;////????????
+			int addr = i*lenRB + dIndex;
+
+			if (sim_with_conductances) {
+				for(j=0;j<4;j++){
+					int addr2 = addr+j*lenRB;
+					tmpgAMPA[j] += ringBuffer[addr2];
+					tmpgNMDA_d[j] += ringBuffer[addr2];
+					ringBuffer[addr2] = 0.;
+				}
+			}
+			
+			simd_load(vgAMPA,&(tmpgAMPA[0]));
+			simd_load(vgNMDA,&(tmpgNMDA_d[0]));
+		} //end Ndt
+
+	/****simd store******/
+		simd_store(vgGABAa,&(tmpgGABAa[0]));
+		simd_store(vgGABAb,&(tmpgGABAb[0]));
+
+		simd_store(vv,&neuronPara[voltage*neuronSizeN+i]);
+		simd_store(vu,&neuronPara[recovery*neuronSizeN+i]);
+		simd_store(vgNMDA,&neuronPara[gNMDA_d*neuronSizeN+i]);
+		simd_store(vgGABAa,&neuronPara[gGABAa*neuronSizeN+i]);
+		simd_store(vgGABAb,&neuronPara[gGABAb_d*neuronSizeN+i]);
+
+		for(j=0;j<4;j++){
+			//neuronPara[voltage*neuronSizeN+i+j]=tmpv[j];
+			nInfo[i+j].gAMPA=tmpgAMPA[j];
+		}
+	
+	} // end SizeN
+	int nr = SizeN-(SizeN/4)*4;
+	if(nr>0){
+		int i0=(SizeN/4)*4;
+		float tmpa[4],tmpb[4];
+
+		for(j=0;j<nr;j++){
+			tmpgNMDA_d[j]=nInfo[i0+j].gNMDA_d;
+			tmpgGABAb[j]=nInfo[i0+j].gGABAb_d;
+			tmpgAMPA[j]=nInfo[i0+j].gAMPA;
+			tmpgGABAa[j]=nInfo[i0+j].gGABAa;
+
+			tmpv[j]=nInfo[i0+j].voltage;
+			tmpu[j]=neuronPara[recovery*SizeN+i0+j];
+			tmpa[j]=nInfo[i0+j].Izh_a;
+			tmpb[j]=nInfo[i0+j].Izh_b;
+		}
+		simd_load(vgNMDA,&(tmpgNMDA_d[0]));
+		simd_load(vgGABAb,&(tmpgGABAb[0]));
+		simd_load(vgAMPA,&(tmpgAMPA[0]));
+		simd_load(vgGABAa,&(tmpgGABAa[0]));
+		
+		simd_load(vv,&(tmpv[0]));
+		simd_load(vu,&(tmpu[0]));
+		simd_load(va,&(tmpa[0]));
+		simd_load(vb,&(tmpb[0]));
+
+		floatv4 vh = swInfo.dt;
+
+	for(it=0;it<swInfo.Ndt;it++){
+		if (sim_with_conductances) {
+			floatv4 vvolt = -60.0;
+			floatv4 aa = 80.0,bb=60.0,cc=70.0,dd=90.0,ee=0.0,ff=1.;
+			viNMDA = (vvolt+aa)*(vvolt+aa)/(bb*bb);
+
+			vtmpI=ee-(vgAMPA*(vvolt-ee)
+				 +vgNMDA*viNMDA/(ff+viNMDA)*(vvolt-ee)
+				 +vgGABAa*(vvolt+cc)
+				 +vgGABAb*(vvolt+dd));
+			
+
+		} else {
+			vtmpI=vgAMPA;
+		}
+
+		/* 4th Runge-Kutta */
+		//float k1,k2,k3,k4;
+		//float l1,l2,l3,l4;
+		floatv4 v0_5=0.5,v0_04=0.04,v5_0=5.0,v140_0=140.0;
+		floatv4 vk1 = dvdtIzh_simd(vv, vu, vtmpI, vh);
+		floatv4 vl1 = dudtIzh_simd(vv, vu, va, vb, vh);
+
+		floatv4 vk2 = dvdtIzh_simd(vv+v0_5*vk1, vu+v0_5*vl1, vtmpI, vh);
+		floatv4 vl2 = dudtIzh_simd(vv+v0_5*vk1, vu+v0_5*vl1, va, vb,vh);
+
+		floatv4 vk3 = dvdtIzh_simd(vv+v0_5*vk2, vu+v0_5*vl2, vtmpI, vh);
+		floatv4 vl3 = dudtIzh_simd(vv+v0_5*vk2, vu+v0_5*vl2, va, vb,vh);
+
+		floatv4 vk4 = dvdtIzh_simd(vv+vk3, vu+vl3, vtmpI, vh);
+		floatv4 vl4 = dudtIzh_simd(vv+vk3, vu+vl3, va, vb, vh);
+
+		floatv4 v2_0=2.0,v6_0=6.0;
+		vv += (vk1+v2_0*vk2+v2_0*vk3+vk4)/v6_0;
+
+		simd_store(vv,&(tmpv[0]));
+
+		if (tmpv[0] < -90.0) tmpv[0] = -90.0;
+		if (tmpv[1] < -90.0) tmpv[1] = -90.0;
+		if (tmpv[2] < -90.0) tmpv[2] = -90.0;
+		if (tmpv[3] < -90.0) tmpv[3] = -90.0;
+
+
+		vu += (vl1+v2_0*vl2+v2_0*vl3+vl4)/v6_0;
+		simd_store(vu,&(tmpu[0]));
+
+		/*** findFiring ***/
+		for(j=0;j<nr;j++){
+			if (tmpv[j]>= 30.0) {
+				tmpv[j] = Izh_c;
+				tmpu[j]+= Izh_d;
+				if(addSpikeToTable_simd_mpi(i0+j,it)) assert(0);//????
+			}
+		}
+
+		simd_load(vv,&(tmpv[0]));
+		simd_load(vu,&(tmpu[0]));
+
+		/******* current set *******/
+		int dIndex=offset+it;////????????
+		assert(dIndex<lenRB);
+		int addr = i0*lenRB + dIndex;
+
+		simd_store(vgAMPA,&(tmpgAMPA[0]));
+		simd_store(vgNMDA,&(tmpgNMDA_d[0]));
+
+		if (sim_with_conductances) {
+			for(j=0;j<nr;j++){
+				int addr2 = addr+j*lenRB;
+				tmpgAMPA[j] += ringBuffer[addr2];
+				tmpgNMDA_d[j] += ringBuffer[addr2];
+				ringBuffer[addr2] = 0.;
+			}
+		} else {
+			assert(0);
+		}
+		simd_load(vgAMPA,&(tmpgAMPA[0]));
+		simd_load(vgNMDA,&(tmpgNMDA_d[0]));
+	} 
+	/****simd store******/
+		simd_store(vgGABAa,&(tmpgGABAa[0]));
+		simd_store(vgGABAb,&(tmpgGABAb[0]));
+
+		for(j=0;j<nr;j++){
+			nInfo[i0+j].voltage=tmpv[j];
+			neuronPara[recovery*neuronSizeN+i0+j]=tmpu[j];
+			nInfo[i0+j].gAMPA=tmpgAMPA[j];
+			nInfo[i].gNMDA_d=tmpgNMDA_d[j];
+			nInfo[i0+j].gGABAa=tmpgGABAa[j];
+			nInfo[i0+j].gGABAb_d=tmpgGABAb[j];
+		}
+	}
+
+}
 #if 1
 static void neuronUpdate_simd(){
 //st5=rpcc();
@@ -303,7 +491,10 @@ static void neuronUpdate_simd(){
 	int i=0,j,it;
 	floatv4 viNMDA, vtmpI;
 	floatv4 vgNMDA, vgGABAb;
-
+	if(_MYID==0&&rank==0){
+		//printf("%f %f %f %f\n",nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d,nInfo[i].gGABAb_d);
+		//printf("shuzu%f %f %f %f\n",nInfo[i].gAMPA,nInfo[i+1].gAMPA,nInfo[i+2].gAMPA,nInfo[i+3].gAMPA);
+	}
 	for(i=0;i<(swInfo.SizeN/4)*4;i+=4) {
 		floatv4 vgAMPA,vgGABAa;
 
@@ -552,8 +743,6 @@ static void neuronUpdate_simd(){
 		}
 	}
 
-
-
 }
 #endif
 static int addSpikeToTable_simd(int i,int it) {
@@ -665,7 +854,7 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 	//get data for firingTableAll[]
 	if(_MYID==0){
 		reply = 0;
-		NSall_slave=0;
+		
 		
 		numST_mpi[simTime%swInfo.Ndelay] = 0xfffffff;
 		athread_get(PE_MODE,
@@ -675,7 +864,6 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 			&reply,0,0,0);
 		
 		while(numST_mpi[simTime%swInfo.Ndelay]==0xfffffff);
-		
 	}
 	
 	intv8 _v;
@@ -750,6 +938,7 @@ static void put_get_syn(synInfo_t *sInfoLc){
 
 static void CurrentUpdate_mpi(void *ptr){//????
 	int i,nid,srcId,iSpike,ibreak;
+	int Ndma = swInfo.Ndma;
 	intv8 _v[8];
 	srcId = 0;
 	int idelay, iblock,nblock;
@@ -779,17 +968,18 @@ static void CurrentUpdate_mpi(void *ptr){//????
 					if (endST_mpi<0){fprintf(stderr,"warn::more than number\n");}
 				}
 				for(j=0;j<8;j++){
-				for(i=0;i<8;i++){
-					if(iSpike==endST_mpi) {
-					int ii;
-					for(ii=i;ii<8;ii++)
-        				((spikeTime_t*)(&_v[j]))[ii].nid=0xffff;
-					break;
+					for(i=0;i<8;i++){
+						if(iSpike==endST_mpi) {
+							int ii;
+							for(ii=i;ii<8;ii++){
+								((spikeTime_t*)(&_v[j]))[ii].nid=0xffff;
+								}
+								break;
+						}
+							((spikeTime_t*)(&_v[j]))[i]=firingTable_mpi[iSpike];
+						iSpike++;
+						assert(iSpike<=lenST_mpi);
 					}
-        				((spikeTime_t*)(&_v[j]))[i]=firingTable_mpi[iSpike];
-					iSpike++;
-					assert(iSpike<=lenST_mpi);
-				}
 				if(jindex) break;
 				}
 			} else {
@@ -809,7 +999,7 @@ long tm0,tm1,tm2,tm3;
 				if(st.nid!=0xffff){
 				rpl[0]=0;
 {tm0=rpcc();{
-        			dma_set_reply(&dma_get_syn,&rpl[0]);
+        		dma_set_reply(&dma_get_syn,&rpl[0]);
 				synInfo_t *sInfoLc=&sInfo[0];
 				syndma(st,sInfoLc);
 }tm1=rpcc();}
@@ -822,15 +1012,15 @@ cdma+=tm1-tm0;
 				if(st.nid==0xffff) {ibreak=1;break;}
 				j=i&(0x07);
 				rpl[j]=0;
-        			dma_set_reply(&dma_get_syn,&rpl[j]);
-				synInfo_t *sInfoLc=&sInfo[j*swInfo.Ndma];
+        		dma_set_reply(&dma_get_syn,&rpl[j]);
+				synInfo_t *sInfoLc=&sInfo[j*Ndma];
 
 {tm0=rpcc();{
 				syndma(st,sInfoLc);
 				j=(i-1)&(0x07);
 				dma_wait(&rpl[j],1);
 }tm1=rpcc();}
-				sInfoLc=&sInfo[(j)*swInfo.Ndma];
+				sInfoLc=&sInfo[(j)*Ndma];
 {tm2=rpcc();{
 				generatePostSpike_simd(st0,sInfoLc);
 }tm3=rpcc();}
@@ -974,9 +1164,6 @@ cspike+=tm3-tm2;
 //ed3=rpcc();
 }
 #endif
-static void PoisCurrentUpdate(void *ptr){//????
-
-}
 
 static void generatePostSpike(spikeTime_t st,synInfo_t *sInfoLc) 
 {
@@ -1005,7 +1192,6 @@ static void syndma(spikeTime_t st,synInfo_t *sInfoLc) {
 	if(!(pre_i<swInfo.preN&&pre_i>=0)) pre_i = 0;
 	int is;
 	int MaxN=swInfo.MaxN;
-	int Ndma=swInfo.Ndma;
 	int Ndelay=swInfo.Ndelay;
 
 	short occurTime=st.time>>swInfo.Nop;
