@@ -41,7 +41,7 @@ __thread_local int recovery,voltage,gAMPA,gNMDA_d,gGABAa,gGABAb_d,neuronSizeN;
 
 extern volatile unsigned int dma[64],spike[64],NS_group,NSall,numSpike[64];
 extern float currentfactor;
-extern int rank;
+extern int rank ,nproc;
 static void syndma(spikeTime_t st,synInfo_t *sInfoLc);
 static void syndma2(spikeTime_t st,synInfo_t *sInfoLc);
 static void put_get_syn(synInfo_t *sInfoLc);
@@ -101,7 +101,7 @@ void initSW(swInfo_t *ptr){
 	/*****allocate mem********/
 
 	nInfo=(neurInfo_t*)ldm_malloc(SizeN*sizeof(neurInfo_t)); //?????
-	sInfo=(synInfo_t*)ldm_malloc(8*swInfo.Ndma*sizeof(synInfo_t));
+	sInfo=(synInfo_t*)ldm_malloc((64*swInfo.Ndma+5)*sizeof(synInfo_t));
 	firingTable_mpi=(spikeTime_t*)ldm_malloc(lenST_mpi*sizeof(spikeTime_t));
 	ringBuffer=(float*)ldm_malloc(lenRB*SizeN*sizeof(float));
 	neuronSizeN = (SizeN/4+1)*4;
@@ -145,7 +145,10 @@ void initSW(swInfo_t *ptr){
 	}
     swInfo.nSpikePoisAll=0;
 	if(rank==0&&_MYID==0){
-		printf("swInfo.Ndelay%d",swInfo.Ndelay);
+		
+		printf("swInfo.MaxN%d\n",swInfo.SizeN);
+		//printf("swInfo.MaxN%d",swInfo.MaxN);
+		
 	}
 
 	return;	
@@ -237,18 +240,6 @@ static void decayConduct(void *ptr){
 // 	return;
 // }
 
-static int addSpikeToTable(int i) {
-	int spikeBufferFull = 0;
-	if(i<swInfo.SizeN) {nInfo[i].nSpikeCnt++;}
-	firingTable[endST].nid = i+swInfo.StartN;
-	firingTable[endST].time= sliceTime;
-	endST++; usedST++; numST[simTime%swInfo.Ndelay]++;
-	if(endST>=lenST) endST -= lenST;
-	if(endST==topST) assert(0);
-	if(usedST==lenST) assert(0);
-	swInfo.fireCnt++;
-	return spikeBufferFull;
-}
 static int addSpikeToTable_mpi(int i){
 	int spikeBufferFull = 0;
 	if(i<swInfo.SizeN) {nInfo[i].nSpikeCnt++;}
@@ -655,10 +646,8 @@ static void neuronUpdate_simd(){
 					if(addSpikeToTable_simd_mpi(i0+j,it)) assert(0);//????
 				}
 			}
-
 			simd_load(vv,&(tmpv[0]));
 			simd_load(vu,&(tmpu[0]));
-
 			/******* current set *******/
 			int dIndex=offset+it;////????????
 			assert(dIndex<lenRB);
@@ -810,6 +799,7 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 
 void SpikeDeliver(void *ptr){
 	SpikeDmaRead_mpi(ptr);//mpi++++
+	CurrentUpdateWzc(ptr);
 	CurrentUpdate_mpi(ptr);
 	float wt=0.00085;
 	float nspike;
@@ -868,6 +858,83 @@ static void put_get_syn(synInfo_t *sInfoLc){
 	return;
 }
 
+void DealSynaptic(void *ptr);
+void CurrentUpdateWzc(void *ptr);
+int ReadFiringTable(int i,int spikeNumber);
+void ReadSynaptic(int DMASynLenth,int pulseID,synInfo_t *sInfoLc);
+
+void CurrentUpdateWzc(void *ptr){
+	int i,j;
+	int spikeNumber = numST_mpi[0];
+	int DMATableLenth;
+	int DMASynLenth = 10000/nproc; //脉冲数量10000
+	synInfo_t *sInfoLc=&sInfo[0];
+
+	/*大部分spikenumber为0*/
+	if(spikeNumber > 5){
+		/*多一次循环*/			
+		for(i=-lenST_mpi;i<spikeNumber;i=i+lenST_mpi){
+			DMATableLenth = ReadFiringTable(i,spikeNumber);
+			for(j=0;j<DMATableLenth;++j){
+				int pulseID = firingTable_mpi[j].nid;
+				int pulsetime = firingTable_mpi[0].nid;
+				
+			}
+
+		}
+	}
+	
+
+
+	
+	if(_MYID==0 && rank ==0){
+		//ReadSynaptic(DMASynLenth,0,sInfoLc);
+		//printf("%d ",DMASynLenth);
+	}
+
+}
+
+int ReadFiringTable(int i,int spikeNumber){
+	int DMATableLenth = lenST_mpi;
+	if((i+lenST_mpi)>spikeNumber){
+		DMATableLenth = i+lenST_mpi-spikeNumber;
+	}
+	reply = 0;
+	athread_get(PE_MODE,
+					&(swInfo.firingTableAll[0]),
+					&(firingTable_mpi[0]),
+					sizeof(spikeTime_t)*DMATableLenth,
+					&reply,0,0,0);
+	dmaWait(&reply,1);
+	return DMATableLenth;
+}
+
+void DealSynaptic(void *ptr){
+
+}
+
+void ReadSynaptic(int DMASynLenth,int pulseID,synInfo_t *sInfoLc){
+
+	int addr = rank*DMASynLenth + pulseID*10000;
+	reply = 0;
+	athread_get(PE_MODE,
+				&swInfo.sInfoHost[addr],
+				sInfoLc,
+				sizeof(spikeTime_t)*DMASynLenth,
+				&reply,0,0,0);
+	dmaWait(&reply,1);
+
+}
+
+
+
+
+
+
+
+
+
+
 static void CurrentUpdate_mpi(void *ptr){//????
 	int i,nid,srcId,iSpike,ibreak;
 	int j;
@@ -879,6 +946,7 @@ static void CurrentUpdate_mpi(void *ptr){//????
 		iSpike=topST;
 		ibreak=0;
 		int ivarray=0;
+		int tmp1 = 0;
 		while(1){
 			if(_MYID==0){
 				int nvarray = lenST_mpi/64;//lenst_mpi=size+64
@@ -887,20 +955,26 @@ static void CurrentUpdate_mpi(void *ptr){//????
 					int least = numST_mpi[idelay]-ivarray*64;
 					iSpike=0;
 					endST_mpi = MIN(least,length);
+
 					if(endST_mpi>0){
-					reply = 0;
-					athread_get(PE_MODE,
-                        			&(swInfo.firingTableAll[0]),
-                        			&(firingTable_mpi[0]),
-                        			sizeof(spikeTime_t)*endST_mpi,
-                        			&reply,0,0,0);
-					dmaWait(&reply,1);
+						reply = 0;
+						athread_get(PE_MODE,
+										&(swInfo.firingTableAll[0]),
+										&(firingTable_mpi[0]),
+										sizeof(spikeTime_t)*endST_mpi,
+										&reply,0,0,0);
+						dmaWait(&reply,1);
+
+						if(endST_mpi>5&&rank==0&&tmp1==0){
+							//printf("%d %d %d %d %d\n",firingTable_mpi[0].nid,firingTable_mpi[1].nid,firingTable_mpi[2].nid,firingTable_mpi[3].nid,firingTable_mpi[4].nid);
+							tmp1++;
+						}
 					}
 					if (endST_mpi<0){fprintf(stderr,"warn::more than number\n");}
 				}
 				for(j=0;j<8;j++){
 					for(i=0;i<8;i++){
-						if(iSpike==endST_mpi) {
+						if(iSpike==endST_mpi) {//if 循环没有用
 							int ii;
 							for(ii=i;ii<8;ii++){
 								((spikeTime_t*)(&_v[j]))[ii].nid=0xffff;
@@ -915,7 +989,7 @@ static void CurrentUpdate_mpi(void *ptr){//????
 			ivarray++;
 			for(j=0;j<8;j++){			
 				_v[j] = put_get_intv8(_v[j],0);
-				if(((spikeTime_t*)(&_v[j]))[7].nid==0xffff) break;
+				if(((spikeTime_t*)(&_v[j]))[7].nid==0xffff) break;//直接广播
 			}
 
 			spikeTime_t st,st0;
