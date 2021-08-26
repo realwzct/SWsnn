@@ -36,6 +36,7 @@ __thread_local int lenRB_mpi,offset_mpi;
 __thread_local int lenST,topST,endST,usedST,numST[20];
 __thread_local volatile int lenST_mpi,topST_mpi,endST_mpi,usedST_mpi,numST_mpi[20];
 __thread_local volatile int t1;
+__thread_local volatile long dmatimes;
 __thread_local float Izh_a,Izh_b,Izh_c,Izh_d;
 __thread_local int recovery,voltage,gAMPA,gNMDA_d,gGABAa,gGABAb_d,neuronSizeN;
 
@@ -75,7 +76,7 @@ inline float dudtIzh(float v, float u, float a, float b, float h) {
 }
 void initSW(swInfo_t *ptr){
 
-	int i;t1=0;
+	int i;t1=0;dmatimes=0;
 	Izh_a=0.02;Izh_b=0.2;Izh_c=-65;Izh_d=8.0;
 	cdma=0;cspike=0;
 	simTime=0,sliceTime=0;lenRB=0;
@@ -163,6 +164,7 @@ void freeSW(void *ptr){//????
 	}
 	if(_MYID==0&&rank==0){
 		printf("decayConduct: %.4lf ms\n", (double)(t1)*1000/(1.45e9));
+		printf("dmatimes%d \n",dmatimes);
 	}
 	reply=0;
 	athread_put(PE_MODE,&cdma,&dma[_MYID],sizeof(int),&reply,0,0);
@@ -338,7 +340,7 @@ static void neuronUpdate_simd_wzc(){
 					tmpgNMDA_d[j] += ringBuffer[addr2];
 					ringBuffer[addr2] = 0.;
 				}
-			}			
+			}
 			simd_load(vgAMPA,&(tmpgAMPA[0]));
 			simd_load(vgNMDA,&(tmpgNMDA_d[0]));
 		} //end Ndt
@@ -800,7 +802,7 @@ static int SpikeDmaRead_mpi(ptr){//mpi++++
 void SpikeDeliver(void *ptr){
 	SpikeDmaRead_mpi(ptr);//mpi++++
 	CurrentUpdateWzc(ptr);
-	CurrentUpdate_mpi(ptr);
+	//CurrentUpdate_mpi(ptr);
 	float wt=0.00085;
 	float nspike;
 	nspike = currentfactor;
@@ -858,81 +860,85 @@ static void put_get_syn(synInfo_t *sInfoLc){
 	return;
 }
 
-void DealSynaptic(void *ptr);
+void DealSynaptic(int time,synInfo_t *sInfoLc);
 void CurrentUpdateWzc(void *ptr);
 int ReadFiringTable(int i,int spikeNumber);
 void ReadSynaptic(int DMASynLenth,int pulseID,synInfo_t *sInfoLc);
 
 void CurrentUpdateWzc(void *ptr){
-	int i,j;
+	int i,j,k;
 	int spikeNumber = numST_mpi[0];
 	int DMATableLenth;
 	int DMASynLenth = 10000/nproc; //脉冲数量10000
+	int neuronSynNumber = 80000;//80000神经元
 	synInfo_t *sInfoLc=&sInfo[0];
 
-	/*大部分spikenumber为0*/
+	/*大部分spikenumber为0，个别为1就直接过滤了*/
 	if(spikeNumber > 5){
 		/*多一次循环*/			
-		for(i=-lenST_mpi;i<spikeNumber;i=i+lenST_mpi){
-			DMATableLenth = ReadFiringTable(i,spikeNumber);
-			for(j=0;j<DMATableLenth;++j){
+		for(i = -lenST_mpi; i < spikeNumber; i = i + lenST_mpi){
+			DMATableLenth = ReadFiringTable(i, spikeNumber);//分段读取firingtable		
+			for(j = 0; j < DMATableLenth; ++j){
 				int pulseID = firingTable_mpi[j].nid;
-				int pulsetime = firingTable_mpi[0].nid;
-				
+				/*一开始想法是id在64从核各自范围内，由各自从核处理，测了一下id值，id只在1-500左右
+				*所以理想化操作
+				*/
 			}
-
+		}		
+	}
+	
+	if(simTime==100||simTime==200||simTime==300||simTime==400||simTime==500||simTime==600||simTime==700||simTime==800||simTime==900||simTime==20){
+		for(k = 0; k < neuronSynNumber; k++){
+			ReadSynaptic(DMASynLenth, k, sInfoLc);//每个对应的神经元读取10000/8个突触
+			DealSynaptic(simTime, sInfoLc);//对每个对应的神经元读取10000/8个突触进行操作
 		}
 	}
-	
-
-
-	
-	if(_MYID==0 && rank ==0){
-		//ReadSynaptic(DMASynLenth,0,sInfoLc);
-		//printf("%d ",DMASynLenth);
-	}
-
+	return ;
 }
 
-int ReadFiringTable(int i,int spikeNumber){
+int ReadFiringTable(int i,int spikeNumber){//读取10000/8个table
 	int DMATableLenth = lenST_mpi;
-	if((i+lenST_mpi)>spikeNumber){
-		DMATableLenth = i+lenST_mpi-spikeNumber;
+	if((i + lenST_mpi) > spikeNumber){
+		DMATableLenth = spikeNumber - i;
 	}
 	reply = 0;
 	athread_get(PE_MODE,
 					&(swInfo.firingTableAll[0]),
 					&(firingTable_mpi[0]),
-					sizeof(spikeTime_t)*DMATableLenth,
+					sizeof(spikeTime_t) * DMATableLenth,
 					&reply,0,0,0);
 	dmaWait(&reply,1);
 	return DMATableLenth;
 }
 
-void DealSynaptic(void *ptr){
-
+void DealSynaptic(int time ,synInfo_t *sInfoLc){//抄的generatePostSpike
+	int m;
+	int Ndelay = swInfo.Ndelay;
+	short occurTime = time>>swInfo.Nop;
+	short iD = simTime - occurTime - 1;
+	for(m=0; m<20; m++){
+		unsigned int post_i = sInfoLc[m].postId;
+		unsigned int dIndex = time + sInfoLc[m].dl - sliceTime + offset;
+		dIndex &= (lenRB - 1);
+		float change = sInfoLc[m].wt;
+		int i = post_i&0xf;
+		//ringBuffer[i*lenRB+dIndex] += change;
+	}
+	return;
 }
 
-void ReadSynaptic(int DMASynLenth,int pulseID,synInfo_t *sInfoLc){
-
-	int addr = rank*DMASynLenth + pulseID*10000;
+void ReadSynaptic(int DMASynLenth, int pulseID, synInfo_t *sInfoLc){//读突触
+	dmatimes++;
+	int addr = DMASynLenth * pulseID + _MYID*20;//ndma 20
 	reply = 0;
 	athread_get(PE_MODE,
 				&swInfo.sInfoHost[addr],
 				sInfoLc,
-				sizeof(spikeTime_t)*DMASynLenth,
+				sizeof(spikeTime_t) * 20,
 				&reply,0,0,0);
 	dmaWait(&reply,1);
-
+	return ;
 }
-
-
-
-
-
-
-
-
 
 
 static void CurrentUpdate_mpi(void *ptr){//????
@@ -1017,6 +1023,7 @@ static void CurrentUpdate_mpi(void *ptr){//????
 
 				{tm0=rpcc();{
 					syndma(st,sInfoLc);
+					//dmatimes++;
 					j=(i-1)&(0x07);
 					dma_wait(&rpl[j],1);
 				}tm1=rpcc();}
@@ -1054,7 +1061,6 @@ static void CurrentUpdate_mpi(void *ptr){//????
 
 static void generatePostSpike(spikeTime_t st,synInfo_t *sInfoLc) 
 {
-	int pre_i=st.nid;
 	int is;
 	int MaxN=swInfo.MaxN;
 	int Ndma=swInfo.Ndma;
@@ -1090,7 +1096,9 @@ static void syndma(spikeTime_t st,synInfo_t *sInfoLc) {
 	}
 	unsigned int addr = pre*Ndelay*NTh*MaxN+iD*NTh*MaxN+_MYID*MaxN;
 	dma(dma_get_syn,&swInfo.sInfoHost[addr],sInfoLc);
+	
 	return;
+	
 }
 
 static void syndma2(spikeTime_t st,synInfo_t *sInfoLc) {
