@@ -608,6 +608,7 @@ static void neuronUpdate_simd(){
 				floatv4 aa = 80.0,bb=60.0,cc=70.0,dd=90.0,ee=0.0,ff=1.;
 				viNMDA = (vvolt+aa)*(vvolt+aa)/(bb*bb);
 
+
 				vtmpI=ee-(vgAMPA*(vvolt-ee)
 					+vgNMDA*viNMDA/(ff+viNMDA)*(vvolt-ee)
 					+vgGABAa*(vvolt+cc)
@@ -692,6 +693,7 @@ static int addSpikeToTable_simd_mpi(int i,int it) {
 	if (firingTable_mpi[endST_mpi].nid==0xffff) firingTable_mpi[endST_mpi].nid = 0;
 	firingTable_mpi[endST_mpi].time= it+sliceTime;//????????
 	endST_mpi++; usedST_mpi++;
+
 	return spikeBufferFull;
 }
 
@@ -866,9 +868,12 @@ void CurrentUpdateWzc(void *ptr){
 	int spikeNumber = numST_mpi[0];
 	int DMATableLenth;
 	int DMASynLenth = 10000/nproc; //脉冲数量10000
+
 	int neuronSynNumber = 10000;//80000神经元
 	synInfo_t *sInfoLc=&sInfo[0];
 	int pulseID;
+
+
 
 	/*大部分spikenumber为0，个别为1就直接过滤了*/
 	if(spikeNumber > 5){
@@ -876,6 +881,7 @@ void CurrentUpdateWzc(void *ptr){
 		for(i = -lenST_mpi; i < spikeNumber; i = i + lenST_mpi){
 			DMATableLenth = ReadFiringTable(i, spikeNumber);//分段读取firingtable		
 			for(j = 0; j < DMATableLenth; ++j){
+
 				int findNumber = 0;
 				pulseID = firingTable_mpi[j].nid;
 				while(findNumber<4){
@@ -887,12 +893,15 @@ void CurrentUpdateWzc(void *ptr){
 				}
 				j=j+findNumber;
 
+				int pulseID = firingTable_mpi[j].nid;
+
 				/*一开始想法是id在64从核各自范围内，由各自从核处理，测了一下id值，id只在1-500左右
 				*所以理想化操作
 				*/
 			}
 		}		
 	}
+
 	if(simTime==100||simTime==200||simTime==300||simTime==400||simTime==500||simTime==600||simTime==700||simTime==800||simTime==900||simTime==20){
 		for(k = 0; k < neuronSynNumber; k++){
 			ReadSynaptic(DMASynLenth, k, sInfoLc);//每个对应的神经元读取10000/8个突触

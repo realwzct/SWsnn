@@ -88,6 +88,7 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 
 	int iND = sInfo->simTime%sInfo->Ndelay;  //IND=0;
 
+
 	spikeTime_t *sendBuf, *recvBuf;
 	int *displs, *recvCount;
 	int root = 0;
