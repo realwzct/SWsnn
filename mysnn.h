@@ -3,12 +3,12 @@
 #include <stdint.h>
 #include <stdlib.h> 
 #include <stdio.h>
-#include <athread.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <assert.h>
-#include "mpi.h"
+
 #include "mypbuf.h"
 typedef uint8_t bool;
 #include "swstruct.h"
@@ -88,7 +88,7 @@ typedef struct grpInfo_s{
 	int StartN;
 	int EndN;
 	int SizeN;
-	int8_t		MaxDelay;
+	int		MaxDelay;
 	int 		FiringCount1sec;
 
 	bool	isSpikeGenerator;

@@ -1,4 +1,6 @@
 #include "mysnn.h"
+#include "mpi.h"
+#include <athread.h>
 
 #define true 1
 #define false 0
@@ -24,7 +26,7 @@ extern SLAVE_FUN(SpikeDeliver)(void*);
 static bool updateTime(snnInfo_t *snnInfo);
 static void doSnnSim(snnInfo_t*,grpInfo_t*,connInfo_t*,neurInfo_t*,synInfo_t*, swInfo_t*);
 extern int rank,nproc;
-static long t1=0,t2=0,t3=0;
+volatile static long t1=0,t2=0,t3=0;
 
 int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t *nInfo,
     synInfo_t *synInfo, swInfo_t *swInfo,int _nmsec, bool printRun) 
@@ -34,7 +36,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t 
 	sInfo->simTimeRunStart = sInfo->simTime;
 	sInfo->simTimeRunStop  = sInfo->simTime+runDurMs;
 
-	athread_init();//initialize athread!!!!
+	//initialize athread!!!!
 	athread_spawn(initSW,swInfo);
     athread_join();
 	int i;
@@ -46,7 +48,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t 
 	}
 	athread_spawn(freeSW,swInfo);
     athread_join();
-	athread_halt();
+	
 
 	unsigned long cdma=0,cspike=0;
 	for(i=0;i<63;i++){
@@ -67,6 +69,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t 
 		printf("neuron state update: %.4lf ms\n", (double)(t1)*1000/CLOCKRATE);
 		printf("mpi time: %.4lf ms\n", (double)(t2)*1000/CLOCKRATE);
 		printf("spike deliver: %.4lf ms\n", (double)(t3)*1000/CLOCKRATE);
+		//printf("sInfo->NN%d",sInfo->NN);//20000神经元
 	}
 
 	return 0;
@@ -75,7 +78,7 @@ int runNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, neurInfo_t 
 static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo, 
     neurInfo_t *nInfo,synInfo_t *synInfo, swInfo_t *swInfo) 
 {
-	long time0,time1,time2,time3;
+	volatile long time0,time1,time2,time3;
 
 	{time0 = rpcc();}
 	athread_spawn(StateUpdate,swInfo);
@@ -83,8 +86,7 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 	{time1 = rpcc();}
 	sInfo->simTime++;
 
-	
-	int iND = sInfo->simTime%sInfo->Ndelay;
+	int iND = sInfo->simTime%sInfo->Ndelay;  //IND=0;
 
 	spikeTime_t *sendBuf, *recvBuf;
 	int *displs, *recvCount;
@@ -109,17 +111,29 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 		}
 	}
 
-	recvBuf = &(sInfo->firingTableAll[iND*sInfo->NN]);
+	recvBuf = &(sInfo->firingTableAll[iND*sInfo->NN]);  //iND
 
-	MPI_Gatherv(sendBuf, 
-		senddatanum, 
-		MPI_INT, 
-		recvBuf, 
+	MPI_Gatherv(sendBuf,
+		senddatanum,
+		MPI_INT,
+		recvBuf,
 		recvCount, 
 		displs, 
 		MPI_INT,
-		root, 
+		root,
 		MPI_COMM_WORLD);
+
+	// if(rank==0){
+	// 	int m1=0;
+	// 	for(m1=0;m1<10;m1++){
+	// 		printf("%d ",sInfo->firingTableAll[m1].nid);
+	// 		printf("%d ",sInfo->firingTableAll[m1].time);
+	// 	}
+	// 	printf("\n");
+	// }
+	if(rank == 0){
+		//printf("NSall\n%d",NSall);
+	}
 
 	MPI_Bcast(&NSall,1,MPI_INT,root,MPI_COMM_WORLD);
 	MPI_Bcast(recvBuf,NSall,MPI_INT,root,MPI_COMM_WORLD);
@@ -129,6 +143,7 @@ static void doSnnSim(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 
 	athread_spawn(SpikeDeliver,swInfo);
 	athread_join();
+
 	{time3 = rpcc();}
 
 	t1 = time1-time0+t1;
@@ -146,7 +161,6 @@ static bool updateTime(snnInfo_t *snnInfo)
 		snnInfo->simTimeSec++;
 		finishedOneSec = true;
 	}
-
 	return finishedOneSec;
 }
 

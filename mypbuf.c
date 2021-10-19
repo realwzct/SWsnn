@@ -13,11 +13,8 @@ void pbufInit(Pbuf_t *pbuf,int minDelay,int maxDelay)
         pbuf->nextFreeSrgNodeIdx=0;
         pbuf->nextFreeChunkIdx=0;
         pbuf->recycledNodes=NULL;
-
-	
         pbuf->ringBufferFront=(StgNode**)malloc((maxDelay+1)*sizeof(StgNode*));
         pbuf->ringBufferBack=(StgNode**)malloc((maxDelay+1)*sizeof(StgNode*));
-        
         reset(pbuf,minDelay,maxDelay);
         pbuf->currT = 0;
 }
@@ -115,9 +112,7 @@ StgNode* getFreeNode(Pbuf_t *pbuf)
 void scheduleSpikeTargetGroup(Pbuf_t *pbuf,spikegroupid_t stg,delaystep_t delay)
 {
     StgNode *n = getFreeNode(pbuf);
-
     int writeIdx=(pbuf->currIdx+delay)%pbuf->ringBufferFront_size;
-
     n->stg    = stg;
     n->delay  = delay;
     n->next   = NULL;

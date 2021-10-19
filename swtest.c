@@ -1,6 +1,9 @@
 #include "mysnn.h"
 #include <sys/time.h>    // for gettimeofday() chenged!!
 #include <stdlib.h>
+#include "mpi.h"
+#include <athread.h>
+
 int g_timestep;
 float currentfactor;
 int rank, nproc;
@@ -29,9 +32,9 @@ int main(int argc, char *argv[])
 	grpInfo_t *grpInfo=(grpInfo_t*)malloc(numGrp*sizeof(grpInfo_t));
 	connInfo_t *connInfo=(connInfo_t*)malloc(numConn*sizeof(connInfo_t));
 
-	long time0,time1,time2;
+	volatile long time0,time1,time2;
 	time0=rpcc();
-
+	athread_init();
 	//initNetwork(&snnInfo,grpInfo,connInfo,numGrp,numConn,randSeed);//初始化网络，但这段没啥用
 
 	NeuronParameter(grpInfo,NE,NI,NP,&snnInfo,delay,connectnumber);//神经元和snn参数设定
@@ -46,7 +49,6 @@ int main(int argc, char *argv[])
 	MPI_Barrier(MPI_COMM_WORLD);//mpi syn
 	
 	time1=rpcc();
-
 	runNetwork(&snnInfo,grpInfo,connInfo,snnInfo.nInfoHost,snnInfo.sInfoHost,snnInfo.swInfo,simulatetime,0);
 	time2=rpcc();
 
@@ -54,7 +56,7 @@ int main(int argc, char *argv[])
 		printf("running time: %.4lf ms\n", (double)(time2-time1)*1000/CLOCKRATE);
 		printf("all time: %.4lf ms\n", (double)(time1-time0)*1000/CLOCKRATE);
 	}
-
+	athread_halt();
     MPI_Finalize();
 	return 0;
 }

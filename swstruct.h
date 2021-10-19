@@ -28,7 +28,6 @@ typedef struct neurInfo_s{
 	
 	float voltage;
 	float recovery;
-
 	float gAMPA;
 	float gNMDA_d;
 	float gGABAa;

@@ -6,13 +6,6 @@
 #include <dma.h>
 #include "my_slave.h"
 
-static __inline long rpcc()
-{
-    long a; asm volatile ("memb");
-    asm volatile ("rcsr %0,4":"=r"(a));
-    return a;
-}
-
 intv8 put_get_intv8(intv8 _v,int srcId)
 {
     int dst=8;

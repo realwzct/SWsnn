@@ -36,6 +36,14 @@ asm volatile ("getc %0\n":"=r"(var)::"memory")
 #define COLSYN  athread_syn(COL_SCOPE,0xff)
 #define ALLSYN  athread_syn(ARRAY_SCOPE,0xffff)
 
+static __inline long rpcc()
+{
+   long a;
+   asm volatile ("memb");
+   asm volatile ("rcsr %0,4":"=r"(a));
+   return a;
+}
+
 #define DMA_SET(d,mode,size,reply) {\
 	  dma_set_size(d, size); \
 	  dma_set_bsize(d, size); \

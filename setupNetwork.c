@@ -2,11 +2,14 @@
 #include <sys/stat.h> // mkdir
 #include <sys/time.h>    // for gettimeofday() chenged!!
 #include <math.h>
-
+#include "setup.h"
+#include "mpi.h"
+#include <athread.h>
 #define COMPACTION_ALIGNMENT_PRE  16
 #define COMPACTION_ALIGNMENT_POST 0
 
 extern int g_timestep;
+extern SLAVE_FUN(tk)(ptr_t*);
 static float getWeights(grpInfo_t *gInfo,int connProp, float initWt, float maxWt, unsigned int nid, int gid);
 static void connectFull(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo); 
 static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo); 
@@ -77,7 +80,7 @@ void ConnectParameter(connInfo_t *connInfo,int delay,grpInfo_t *gInfo){
 	/*******conn para******/
 	int DL = delay;
 	assert(DL>=2);
-	minD=1; maxD=DL; minW=0.0;initW=0.000001;maxW=0.000001;
+	minD=1; maxD=DL; minW=0.0;initW=0.000000001;maxW=0.000000001;
 	gSrc=0;gDest=0;
 	int j=0;
 	connInfo[j].connId=j;
@@ -93,7 +96,7 @@ void ConnectParameter(connInfo_t *connInfo,int delay,grpInfo_t *gInfo){
 	
 	/*******conn para******/
 	//NP->NE
-	minD=1; maxD=DL; minW=0.000;initW=0.0005;maxW=0.0005;
+	minD=1; maxD=DL; minW=0.000;initW=0.0000005;maxW=0.0000005;
 	gSrc=1;gDest=0;
 	j++;
 	connInfo[j].connId=j;
@@ -265,10 +268,6 @@ void initNetwork(snnInfo_t *sInfo, grpInfo_t *gInfo,connInfo_t *cInfo,
 }
 
 static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo) {
-	int rank, nproc;
-	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
 	uint8_t minD=1;
 	uint8_t maxD=cInfo->maxDelay;
 	assert(maxD-1==sInfo->Ndelay);
@@ -279,58 +278,71 @@ static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo) {
 	int Ndelay=sInfo->Ndelay;
 	int MaxN=sInfo->MaxN;
 	int SizeN=sInfo->swInfo[0].SizeN;
-
-	//printf("connectPart::preN=%d Ndelay=%d NTh=%d MaxN=%d SizeN=%d\n",preN,Ndelay,NTh,MaxN,SizeN);
+	printf("connectPart::preN=%d Ndelay=%d NTh=%d MaxN=%d SizeN=%d\n",preN,Ndelay,NTh,MaxN,SizeN);
+	
 	/******init*****/
 	long is;
 	long len=sInfo->preN*Ndelay*NTh*MaxN;
 
-	for(is=0;is<len;is++){
-		sInfo->sInfoHost[is].postId=0xffff;
-		sInfo->sInfoHost[is].dl=0;
-	}
+	//printf("connectPart:: len=%d\n",len);
 
+	// for(is=0;is<len;is++){
+	// 	sInfo->sInfoHost[is].postId=0xffff;
+	// 	sInfo->sInfoHost[is].dl=0;
+	// }
+	//后来赋值了，这段没啥用处
+
+	// para_t parat;
+	// parat.len = len;
+	// parat.sInfoHost = &sInfo->sInfoHost[0];
+	// athread_spawn(tk,&parat);
+	// athread_join();
 	
 	int MIND=minD<<sInfo->Nop;
 	assert(MIND==sInfo->Ndt);
 	int MAXD=maxD<<sInfo->Nop;
 	assert((MAXD-MIND)%sInfo->Ndt==0);
+
+
+	ptr_t ptr;
+	ptr.snnInfo_s = *sInfo;
+	ptr.connInfo_s = cInfo;
+
+	athread_spawn(tk,&ptr);
+	athread_join();
+
 	int i,j;
 	int Ndma[NTh];for(i=0;i<NTh;i++)Ndma[i]=0;
-	for(i=0;i<sInfo->preN;i++)  {
+	for(i=0;i<sInfo->preN;i++){
 		int offset=i*Ndelay*NTh*MaxN;
-		if(i==sInfo->numNReg) cInfo++;
-
-		float fac=1.0;
-		if(i>=gInfo[1].StartN && i<sInfo->numNReg) fac=-1.0;
+		if(i==sInfo->numNReg) 
+			cInfo++;
 
 		int iD=0,iTh=0,iN[20];
 		assert(sInfo->Ndelay<=20);
-		for(iD=0;iD<Ndelay;iD++)iN[iD]=0;
+		for(iD=0;iD<Ndelay;iD++)
+			iN[iD]=0;
 
 		int NNN; //select 1,2,3,4
-		NNN = sInfo->numNReg/sInfo->Nsyn;
+		NNN = sInfo->numNReg/sInfo->Nsyn; //40
+		
 		assert(NNN>0);
 		for(j=i%NNN;j<sInfo->numNReg;j+=NNN) {
 			if(j<sInfo->gStart||j>=sInfo->gStart+sInfo->gSize) continue;
 			if(j>=sInfo->swInfo[iTh].StartN+sInfo->swInfo[iTh].SizeN){
 				iTh++;
-				for(iD=0;iD<Ndelay;iD++)iN[iD]=0;
-				
+				for(iD=0;iD<Ndelay;iD++)
+					iN[iD]=0;
 			}
 			if((noDirect)&&i==j) continue;
 
 			uint8_t dVal;
 			for(;;){
-
 				dVal=((i+j/NNN)%sInfo->Ndelay+1)<<sInfo->Nop;//for test
 				assert((dVal>=MIND)&&(dVal<MAXD));
 				iD = (dVal-MIND)>>sInfo->Nop;
 				assert(iD<sInfo->Ndelay && iD>=0);
-				if(iN[iD]<MaxN) break;
-				else {
-					break;
-				}
+				break;
 			}
 			synWt=cInfo->initWt;
 			assert(synWt>=0.);
@@ -339,21 +351,20 @@ static void connectPart(snnInfo_t *sInfo,connInfo_t* cInfo,grpInfo_t *gInfo) {
 			sInfo->sInfoHost[addr].wt=synWt;
 			sInfo->sInfoHost[addr].dl=dVal;
 			iN[iD]++;
-			if(iN[iD]>Ndma[iTh]) Ndma[iTh]=iN[iD];
+			if(iN[iD]>Ndma[iTh]) 
+				Ndma[iTh]=iN[iD];
 		}
-
 	}
-	for(i=0;i<NTh;i++)sInfo->swInfo[i].Ndma = Ndma[i];
+	for(i=0;i<NTh;i++)
+		sInfo->swInfo[i].Ndma = Ndma[i];
 	return;
 }//connectPart
 
 void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 	int i,j;
 	int rank, nproc;
-	
 	MPI_Comm_size(MPI_COMM_WORLD, &nproc);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
 	sInfo->gSize = (sInfo->numNReg-1)/nproc+1;
 	sInfo->gStart = sInfo->gSize*rank;
 	if(rank=nproc-1)sInfo->gSize = sInfo->numNReg-(nproc-1)*sInfo->gSize;
@@ -367,11 +378,9 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 	if(sInfo->Ndelay==0) assert(0);
 	
 	sInfo->Ndt = g_timestep;
-	//sInfo->Nop = (int)(log2(timestep));
 	sInfo->Nop = (int)(log(g_timestep)/log(2));
 	sInfo->dt=1.0/sInfo->Ndt;
 	
-
 	sInfo->simTime = 0;
 	sInfo->preN = sInfo->numN;
 
@@ -391,7 +400,7 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 		}
 		sInfo->swInfo[i].preN = sInfo->preN;
 		sInfo->swInfo[i].Ndelay = sInfo->Ndelay;
-		sInfo->swInfo[i].MaxN = sInfo->MaxN;
+		sInfo->swInfo[i].MaxN = sInfo->MaxN;//MaxN是10000脉冲除以rank数量
 		sInfo->swInfo[i].Ndt = sInfo->Ndt;
 		sInfo->swInfo[i].Nop = sInfo->Nop;
 		sInfo->swInfo[i].dt = sInfo->dt;
@@ -403,8 +412,8 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 
 	sInfo->nInfoHost=(neurInfo_t*)malloc(sInfo->gSize*sizeof(neurInfo_t));
 	sInfo->sInfoHost=NULL;	
-	sInfo->sInfoHost=(synInfo_t*)malloc((long)sInfo->preN*sInfo->Ndelay*sInfo->MaxN*NTh*sizeof(synInfo_t));
-
+	sInfo->sInfoHost=(synInfo_t*)malloc((long)sInfo->preN*sInfo->Ndelay*sInfo->MaxN*NTh*sizeof(synInfo_t));//maxn20
+	//printf("sInfo->Ndelay%d",sInfo->Ndelay);//80000*20*64=12 800 000
 	//mpi mem alloc
 	sInfo->NNgroup = sInfo->gSize;
 	sInfo->NN = sInfo->NNgroup*nproc;
@@ -453,18 +462,14 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 		MPI_INT,
 		root, 
 		MPI_COMM_WORLD);
-#if 1	
+	
  	MPI_Bcast(&nsall,1,MPI_INT,root,MPI_COMM_WORLD);
 	MPI_Bcast(recvBuf,nsall,MPI_INT,root,MPI_COMM_WORLD);
-#endif 
+
 }
 #endif
 	/*******set syn and neur*******/
 	int gid;
-	assert(gInfo[0].StartN==0);
-	assert(gInfo[0].EndN+1==gInfo[1].StartN);
-	assert(gInfo[1].EndN+1==sInfo->numNReg);
-	assert(sInfo->numGrp==3);
 	for(gid=0;gid<2;gid++){
 		for(i=gInfo[gid].StartN;i<=gInfo[gid].EndN;i++){
 			if(i<sInfo->gStart||i>=sInfo->gStart+sInfo->gSize) continue;
@@ -474,10 +479,12 @@ void buildModel(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){//????
 
 	if(sInfo->Nsyn==sInfo->numNReg)	{
 		connectPart(sInfo,&cInfo[0],gInfo);
-	}else if(sInfo->Nsyn<sInfo->numNReg){
-	
+	}
+	else if(sInfo->Nsyn<sInfo->numNReg)
+	{
 		connectPart(sInfo,&cInfo[0],gInfo);
-	}else {printf("Error::Nsyn can't be over Nreg\n");assert(0);}
+	}else 
+	{printf("Error::Nsyn can't be over Nreg\n");assert(0);}
 	return;
 }
 
@@ -520,16 +527,23 @@ void createNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo,connInfo_t *cInfo){
 	return;
 }
 
-void setupNetwork(snnInfo_t *sInfo,grpInfo_t *gInfo) 
-{
-}
-
 static void resetNeuron(neurInfo_t *nInfo,int n,grpInfo_t *gInfo,int g) 
 {
-	nInfo[n].Izh_a=gInfo[g].Izh_a+gInfo[g].Izh_a_sd*(float)drand48();
-	nInfo[n].Izh_b=gInfo[g].Izh_b+gInfo[g].Izh_b_sd*(float)drand48();
-	nInfo[n].Izh_c=gInfo[g].Izh_c+gInfo[g].Izh_c_sd*(float)drand48();
-	nInfo[n].Izh_d=gInfo[g].Izh_d+gInfo[g].Izh_d_sd*(float)drand48();
+	// nInfo[n].Izh_a=gInfo[g].Izh_a+gInfo[g].Izh_a_sd*(float)drand48();
+	// nInfo[n].Izh_b=gInfo[g].Izh_b+gInfo[g].Izh_b_sd*(float)drand48();
+	// nInfo[n].Izh_c=gInfo[g].Izh_c+gInfo[g].Izh_c_sd*(float)drand48();
+	// nInfo[n].Izh_d=gInfo[g].Izh_d+gInfo[g].Izh_d_sd*(float)drand48();
+	// nInfo[n].voltage=nInfo[n].Izh_c;// initial values for new_v
+	// nInfo[n].recovery=nInfo[n].Izh_b*nInfo[n].voltage;//for new_u
+	// nInfo[n].gAMPA = 0.;
+	// nInfo[n].gNMDA_d = 0.;
+	// nInfo[n].gGABAa = 0.;
+	// nInfo[n].gGABAb_d = 0.;
+
+	nInfo[n].Izh_a=gInfo[g].Izh_a;
+	nInfo[n].Izh_b=gInfo[g].Izh_b;
+	nInfo[n].Izh_c=gInfo[g].Izh_c;
+	nInfo[n].Izh_d=gInfo[g].Izh_d;
 	nInfo[n].voltage=nInfo[n].Izh_c;// initial values for new_v
 	nInfo[n].recovery=nInfo[n].Izh_b*nInfo[n].voltage;//for new_u
 	nInfo[n].gAMPA = 0.;
@@ -538,5 +552,5 @@ static void resetNeuron(neurInfo_t *nInfo,int n,grpInfo_t *gInfo,int g)
 	nInfo[n].gGABAb_d = 0.;
 }
 
-
+//这段代码结果未发生变化
 
